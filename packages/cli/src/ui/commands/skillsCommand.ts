@@ -5,6 +5,12 @@
  */
 
 import {
+  ACTIVATE_SKILL_TOOL_NAME,
+  getAdminErrorMessage,
+  getErrorMessage,
+  type SkillDefinition,
+} from '@google/gemini-cli-core';
+import {
   type CommandContext,
   type SlashCommand,
   type SlashCommandActionReturn,
@@ -16,8 +22,6 @@ import {
   MessageType,
 } from '../types.js';
 import { disableSkill, enableSkill } from '../../utils/skillSettings.js';
-
-import { getAdminErrorMessage, getErrorMessage } from '@google/gemini-cli-core';
 import {
   linkSkill,
   renderSkillActionFeedback,
@@ -27,12 +31,46 @@ import {
   requestConsentInteractive,
   skillsConsentString,
 } from '../../config/extensions/consent.js';
+import { parseSlashCommand } from '../../utils/commands.js';
+import {
+  SharedFabricRegistry,
+  type SharedFabricSkillCandidate,
+} from '../../services/sharedFabricRegistry.js';
+
+function getSharedFabricRegistry(
+  context: CommandContext,
+): SharedFabricRegistry {
+  const settingsWithWorkspace = context.services.settings as {
+    workspace?: { path?: string };
+  };
+  return new SharedFabricRegistry({
+    workspaceRoot:
+      settingsWithWorkspace.workspace?.path ||
+      process.env['GEMINI2_SHARED_FABRIC_WORKSPACE'] ||
+      process.cwd(),
+  });
+}
+
+function toSkillsListItem(
+  skills: SkillDefinition[],
+  showDescriptions: boolean,
+): HistoryItemSkillsList {
+  return {
+    type: MessageType.SKILLS_LIST,
+    skills,
+    showDescriptions,
+  };
+}
+
+function getSkillManager(context: CommandContext) {
+  return context.services.agentContext?.config.getSkillManager();
+}
 
 async function listAction(
   context: CommandContext,
   args: string,
 ): Promise<void | SlashCommandActionReturn> {
-  const subArgs = args.trim().split(/\s+/);
+  const subArgs = args.trim().split(/\s+/).filter(Boolean);
 
   // Default to SHOWING descriptions. The user can hide them with 'nodesc'.
   let useShowDescriptions = true;
@@ -46,7 +84,7 @@ async function listAction(
     }
   }
 
-  const skillManager = context.services.agentContext?.config.getSkillManager();
+  const skillManager = getSkillManager(context);
   if (!skillManager) {
     context.ui.addItem({
       type: MessageType.ERROR,
@@ -59,20 +97,205 @@ async function listAction(
     ? skillManager.getAllSkills()
     : skillManager.getAllSkills().filter((s) => !s.isBuiltin);
 
-  const skillsListItem: HistoryItemSkillsList = {
-    type: MessageType.SKILLS_LIST,
-    skills: skills.map((skill) => ({
-      name: skill.name,
-      description: skill.description,
-      disabled: skill.disabled,
-      location: skill.location,
-      body: skill.body,
-      isBuiltin: skill.isBuiltin,
-    })),
-    showDescriptions: useShowDescriptions,
-  };
+  context.ui.addItem(toSkillsListItem(skills, useShowDescriptions));
+}
 
-  context.ui.addItem(skillsListItem);
+async function activeAction(
+  context: CommandContext,
+): Promise<void | SlashCommandActionReturn> {
+  const skillManager = getSkillManager(context);
+  if (!skillManager) {
+    context.ui.addItem({
+      type: MessageType.ERROR,
+      text: 'Could not retrieve skill manager.',
+    });
+    return;
+  }
+
+  const activeSkills = skillManager
+    .getAllSkills()
+    .filter((skill) => skillManager.isSkillActive(skill.name));
+
+  if (activeSkills.length === 0) {
+    context.ui.addItem({
+      type: MessageType.INFO,
+      text: 'No skills are currently active in this session.',
+      secondaryText:
+        'Run /skills use <name> or invoke a skill slash command to activate one.',
+    } as HistoryItemInfo);
+    return;
+  }
+
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `${activeSkills.length} active skill${
+      activeSkills.length > 1 ? 's' : ''
+    } loaded into this session.`,
+    secondaryText:
+      'These are the skills whose guidance is currently available to the model.',
+  } as HistoryItemInfo);
+  context.ui.addItem(toSkillsListItem(activeSkills, true));
+}
+
+async function searchAction(
+  context: CommandContext,
+  args: string,
+): Promise<void | SlashCommandActionReturn> {
+  const query = args.trim();
+  if (!query) {
+    context.ui.addItem({
+      type: MessageType.ERROR,
+      text: 'Usage: /skills search <query>',
+    });
+    return;
+  }
+
+  const registry = getSharedFabricRegistry(context);
+  const matches = await registry.searchSkills(query, 12);
+
+  if (matches.length === 0) {
+    context.ui.addItem({
+      type: MessageType.INFO,
+      text: `No shared-fabric skills matched "${query}".`,
+      secondaryText:
+        'Try a broader query or use /skills recommend <query> for routed suggestions.',
+    } as HistoryItemInfo);
+    return;
+  }
+
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Found ${matches.length} shared-fabric skill${
+      matches.length > 1 ? 's' : ''
+    } for "${query}".`,
+    secondaryText:
+      'Use /skills use <name> to load one into this Gemini-2 session.',
+  } as HistoryItemInfo);
+  context.ui.addItem(toSkillsListItem(matches, true));
+}
+
+async function recommendAction(
+  context: CommandContext,
+  args: string,
+): Promise<void | SlashCommandActionReturn> {
+  const query = args.trim();
+  if (!query) {
+    context.ui.addItem({
+      type: MessageType.ERROR,
+      text: 'Usage: /skills recommend <query>',
+    });
+    return;
+  }
+
+  const registry = getSharedFabricRegistry(context);
+  const route = await registry.recommendSkills(query, 8);
+
+  if (route.skills.length === 0) {
+    context.ui.addItem({
+      type: MessageType.INFO,
+      text: `No routed skill recommendations were found for "${query}".`,
+      secondaryText:
+        'Try /skills search <query> or inspect /fabric status for shared-fabric readiness.',
+    } as HistoryItemInfo);
+    return;
+  }
+
+  const domainText = route.domain ? ` Routed to ${route.domain.label}.` : '';
+
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Recommended ${route.skills.length} skill${
+      route.skills.length > 1 ? 's' : ''
+    } for "${query}".${domainText}`,
+    secondaryText:
+      route.domain?.summary ||
+      'Use /skills use <name> to pull one of these into the current session.',
+  } as HistoryItemInfo);
+  context.ui.addItem(toSkillsListItem(route.skills, true));
+}
+
+async function useAction(
+  context: CommandContext,
+  args: string,
+): Promise<void | SlashCommandActionReturn> {
+  const [skillName = '', ...promptParts] = args
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!skillName) {
+    context.ui.addItem({
+      type: MessageType.ERROR,
+      text: 'Usage: /skills use <name> [task prompt]',
+    });
+    return;
+  }
+
+  const config = context.services.agentContext?.config;
+  const skillManager = config?.getSkillManager();
+  if (!config || !skillManager) {
+    context.ui.addItem({
+      type: MessageType.ERROR,
+      text: 'Could not retrieve skill configuration.',
+    });
+    return;
+  }
+
+  let skill = skillManager.getSkill(skillName);
+  let loadedCandidate: SharedFabricSkillCandidate | null = null;
+
+  if (!skill) {
+    const registry = getSharedFabricRegistry(context);
+    loadedCandidate = await registry.findSkillByName(skillName);
+    if (!loadedCandidate) {
+      const suggestions = await registry.searchSkills(skillName, 3);
+      const suggestionText =
+        suggestions.length > 0
+          ? ` Did you mean ${suggestions.map((entry) => `"${entry.name}"`).join(', ')}?`
+          : '';
+
+      context.ui.addItem({
+        type: MessageType.ERROR,
+        text: `Shared-fabric skill "${skillName}" was not found.${suggestionText}`,
+      });
+      return;
+    }
+
+    const loadedSkill = await registry.loadSkillDefinition(
+      loadedCandidate.name,
+    );
+    if (!loadedSkill) {
+      context.ui.addItem({
+        type: MessageType.ERROR,
+        text: `Failed to load shared-fabric skill "${loadedCandidate.name}" from disk.`,
+      });
+      return;
+    }
+
+    skillManager.addSkills([loadedSkill]);
+    context.ui.reloadCommands();
+    skill = loadedSkill;
+  }
+
+  const prompt = promptParts.join(' ').trim();
+  const isSharedFabricSkill = !!loadedCandidate;
+
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: isSharedFabricSkill
+      ? `Loaded shared-fabric skill "${skill.name}" into this session.`
+      : `Using skill "${skill.name}" in this session.`,
+    secondaryText: isSharedFabricSkill
+      ? `Source: ${loadedCandidate?.location}. Run /skills active to inspect current activations.`
+      : 'Run /skills active to inspect current activations.',
+  } as HistoryItemInfo);
+
+  return {
+    type: 'tool',
+    toolName: ACTIVATE_SKILL_TOOL_NAME,
+    toolArgs: { name: skill.name },
+    postSubmitPrompt:
+      prompt.length > 0 ? prompt : `Use the skill ${skill.name}`,
+  };
 }
 
 async function linkAction(
@@ -150,7 +373,7 @@ async function disableAction(
     });
     return;
   }
-  const skillManager = context.services.agentContext?.config.getSkillManager();
+  const skillManager = getSkillManager(context);
   if (skillManager?.isAdminEnabled() === false) {
     context.ui.addItem(
       {
@@ -185,7 +408,7 @@ async function disableAction(
 
   let feedback = renderSkillActionFeedback(
     result,
-    (label, path) => `${label} (${path})`,
+    (label, pathToSetting) => `${label} (${pathToSetting})`,
   );
   if (result.status === 'success' || result.status === 'no-op') {
     feedback +=
@@ -211,7 +434,7 @@ async function enableAction(
     return;
   }
 
-  const skillManager = context.services.agentContext?.config.getSkillManager();
+  const skillManager = getSkillManager(context);
   if (skillManager?.isAdminEnabled() === false) {
     context.ui.addItem(
       {
@@ -230,7 +453,7 @@ async function enableAction(
 
   let feedback = renderSkillActionFeedback(
     result,
-    (label, path) => `${label} (${path})`,
+    (label, pathToSetting) => `${label} (${pathToSetting})`,
   );
   if (result.status === 'success' || result.status === 'no-op') {
     feedback +=
@@ -335,7 +558,7 @@ function disableCompletion(
   context: CommandContext,
   partialArg: string,
 ): string[] {
-  const skillManager = context.services.agentContext?.config.getSkillManager();
+  const skillManager = getSkillManager(context);
   if (!skillManager) {
     return [];
   }
@@ -349,7 +572,7 @@ function enableCompletion(
   context: CommandContext,
   partialArg: string,
 ): string[] {
-  const skillManager = context.services.agentContext?.config.getSkillManager();
+  const skillManager = getSkillManager(context);
   if (!skillManager) {
     return [];
   }
@@ -359,12 +582,26 @@ function enableCompletion(
     .map((s) => s.name);
 }
 
-import { parseSlashCommand } from '../../utils/commands.js';
+async function useCompletion(
+  context: CommandContext,
+  partialArg: string,
+): Promise<string[]> {
+  const skillManager = getSkillManager(context);
+  const loadedSkills =
+    skillManager
+      ?.getAllSkills()
+      .filter((skill) => skill.name.startsWith(partialArg))
+      .map((skill) => skill.name) ?? [];
+  const registry = getSharedFabricRegistry(context);
+  const sharedSkills = await registry.completeSkillNames(partialArg);
+
+  return [...new Set([...loadedSkills, ...sharedSkills])].slice(0, 20);
+}
 
 export const skillsCommand: SlashCommand = {
   name: 'skills',
   description:
-    'List, enable, disable, or reload Gemini CLI agent skills. Usage: /skills [list | disable <name> | enable <name> | reload]',
+    'Inspect, search, load, enable, disable, or reload Gemini CLI skills. Usage: /skills [list | active | search <query> | recommend <query> | use <name> [task] | disable <name> | enable <name> | reload]',
   kind: CommandKind.BUILT_IN,
   autoExecute: false,
   subCommands: [
@@ -374,6 +611,35 @@ export const skillsCommand: SlashCommand = {
         'List available agent skills. Usage: /skills list [nodesc] [all]',
       kind: CommandKind.BUILT_IN,
       action: listAction,
+    },
+    {
+      name: 'active',
+      description:
+        'List skills currently active in this session. Usage: /skills active',
+      kind: CommandKind.BUILT_IN,
+      action: activeAction,
+    },
+    {
+      name: 'search',
+      description:
+        'Search the shared-fabric skill catalog. Usage: /skills search <query>',
+      kind: CommandKind.BUILT_IN,
+      action: searchAction,
+    },
+    {
+      name: 'recommend',
+      description:
+        'Route a request to recommended shared-fabric skills. Usage: /skills recommend <query>',
+      kind: CommandKind.BUILT_IN,
+      action: recommendAction,
+    },
+    {
+      name: 'use',
+      description:
+        'Load a shared-fabric skill into this session and activate it. Usage: /skills use <name> [task prompt]',
+      kind: CommandKind.BUILT_IN,
+      action: useAction,
+      completion: useCompletion,
     },
     {
       name: 'link',

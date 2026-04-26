@@ -7,7 +7,7 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { agentsCommand } from './agentsCommand.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
-import type { Config } from '@google/gemini-cli-core';
+import { AGENT_TOOL_NAME, type Config } from '@google/gemini-cli-core';
 import type { LoadedSettings } from '../../config/settings.js';
 import { MessageType } from '../types.js';
 import { enableAgent, disableAgent } from '../../utils/agentSettings.js';
@@ -36,6 +36,9 @@ describe('agentsCommand', () => {
       getAgentRegistry: vi.fn().mockReturnValue({
         getAllDefinitions: vi.fn().mockReturnValue([]),
         getAllAgentNames: vi.fn().mockReturnValue([]),
+        getAllDiscoveredAgentNames: vi.fn().mockReturnValue([]),
+        getDefinition: vi.fn(),
+        getDiscoveredDefinition: vi.fn(),
         reload: vi.fn(),
       }),
       get config() {
@@ -240,6 +243,87 @@ describe('agentsCommand', () => {
       type: 'message',
       messageType: 'error',
       content: 'Config not loaded.',
+    });
+  });
+
+  it('should recommend agents for a query', async () => {
+    mockConfig.getAgentRegistry = vi.fn().mockReturnValue({
+      getAllDefinitions: vi.fn().mockReturnValue([
+        {
+          name: 'researcher',
+          displayName: 'Researcher',
+          description: 'Investigate code and collect evidence',
+          kind: 'local',
+        },
+        {
+          name: 'reviewer',
+          displayName: 'Reviewer',
+          description: 'Review code for regressions',
+          kind: 'local',
+        },
+      ]),
+    });
+
+    const recommendCommand = agentsCommand.subCommands?.find(
+      (cmd) => cmd.name === 'recommend',
+    );
+    const result = await recommendCommand!.action!(
+      mockContext,
+      'research code changes',
+    );
+
+    expect(result).toBeUndefined();
+    expect(mockContext.ui.addItem).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: MessageType.INFO,
+        text: expect.stringContaining('Recommended 2 agents'),
+      }),
+    );
+    expect(mockContext.ui.addItem).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: MessageType.AGENTS_LIST,
+        agents: [
+          expect.objectContaining({ name: 'researcher' }),
+          expect.objectContaining({ name: 'reviewer' }),
+        ],
+      }),
+    );
+  });
+
+  it('should fork a task through the invoke_agent tool', async () => {
+    mockConfig.getAgentRegistry = vi.fn().mockReturnValue({
+      getDefinition: vi.fn().mockReturnValue({
+        name: 'researcher',
+        displayName: 'Researcher',
+        description: 'Investigate code and collect evidence',
+        kind: 'local',
+      }),
+      getDiscoveredDefinition: vi.fn().mockReturnValue(undefined),
+    });
+
+    const taskCommand = agentsCommand.subCommands?.find(
+      (cmd) => cmd.name === 'task',
+    );
+    const result = await taskCommand!.action!(
+      mockContext,
+      'researcher inspect the auth flow',
+    );
+
+    expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: MessageType.INFO,
+        text: 'Forking task to agent "researcher".',
+      }),
+    );
+    expect(result).toEqual({
+      type: 'tool',
+      toolName: AGENT_TOOL_NAME,
+      toolArgs: {
+        agent_name: 'researcher',
+        prompt: 'inspect the auth flow',
+      },
     });
   });
 

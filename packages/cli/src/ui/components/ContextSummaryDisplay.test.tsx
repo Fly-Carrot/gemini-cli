@@ -94,4 +94,14 @@ describe('<ContextSummaryDisplay />', () => {
     expect(lastFrame()).toMatchSnapshot();
     unmount();
   });
+
+  it('should render active skill count when present', async () => {
+    const props = {
+      ...baseProps,
+      activeSkillCount: 2,
+    };
+    const { lastFrame, unmount } = await renderWithWidth(120, props);
+    expect(lastFrame()).toContain('2 active skills');
+    unmount();
+  });
 });

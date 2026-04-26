@@ -10,6 +10,7 @@ import type { SlashCommand, CommandContext } from './types.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
 import { MessageType } from '../types.js';
 import type { LoadedSettings } from '../../config/settings.js';
+import { SharedFabricRegistry } from '../../services/sharedFabricRegistry.js';
 import {
   refreshMemory,
   refreshServerHierarchicalMemory,
@@ -62,7 +63,7 @@ describe('memoryCommand', () => {
   let mockContext: CommandContext;
 
   const getSubCommand = (
-    name: 'show' | 'add' | 'reload' | 'list',
+    name: 'show' | 'add' | 'reload' | 'list' | 'team',
   ): SlashCommand => {
     const subCommand = memoryCommand.subCommands?.find(
       (cmd) => cmd.name === name,
@@ -204,6 +205,72 @@ describe('memoryCommand', () => {
         toolName: 'save_memory',
         toolArgs: { fact },
       });
+    });
+  });
+
+  describe('/memory team', () => {
+    let teamCommand: SlashCommand;
+
+    beforeEach(() => {
+      teamCommand = getSubCommand('team');
+      vi.spyOn(SharedFabricRegistry.prototype, 'getStatus').mockResolvedValue({
+        available: true,
+        globalRoot: '/fabric',
+        workspaceRoot: '/workspace',
+        bootSequencePath: '/fabric/sync/boot-sequence.md',
+        runtimeMapPath: '/fabric/sync/runtime-map.yaml',
+        memoryRoutesPath: '/fabric/memory/routes.yaml',
+        domainMapPath: '/fabric/domain.md',
+        skillsIndexPath: '/skills/index.json',
+        workspaceOverlayPath:
+          '/workspace/.agents/sync/user-question-profile.md',
+        bootSequenceExists: true,
+        runtimeMapExists: true,
+        memoryRoutesExists: true,
+        domainMapExists: true,
+        skillsIndexExists: true,
+        workspaceOverlayExists: true,
+        sources: [],
+        indexedSkillCount: 0,
+        routedDomainCount: 0,
+      });
+      mockContext = createMockCommandContext({
+        services: {
+          agentContext: {
+            config: {
+              getMemoryContextManager: vi.fn().mockReturnValue({
+                getLoadedPaths: vi
+                  .fn()
+                  .mockReturnValue(
+                    new Set(['/workspace/GEMINI.md', '/workspace/TEAM.md']),
+                  ),
+                getExtensionMemory: vi.fn().mockReturnValue('extension'),
+                getUserProjectMemory: vi.fn().mockReturnValue('user-project'),
+              }),
+              getGeminiMdFilePaths: vi
+                .fn()
+                .mockReturnValue(['/workspace/GEMINI.md']),
+              getGlobalMemory: vi.fn().mockReturnValue('global'),
+              getEnvironmentMemory: vi.fn().mockReturnValue('project'),
+            },
+          },
+          settings: {
+            workspace: { path: '/workspace' },
+          } as unknown as LoadedSettings,
+        },
+      });
+    });
+
+    it('shows layered team memory details', async () => {
+      await teamCommand.action!(mockContext, '');
+
+      expect(mockContext.ui.addItem).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          type: MessageType.INFO,
+          text: 'Team memory lanes loaded from 2 file(s).',
+        }),
+      );
     });
   });
 

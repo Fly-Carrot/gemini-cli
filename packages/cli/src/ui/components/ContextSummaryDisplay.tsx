@@ -18,6 +18,7 @@ interface ContextSummaryDisplayProps {
   blockedMcpServers?: Array<{ name: string; extensionName: string }>;
   ideContext?: IdeContext;
   skillCount: number;
+  activeSkillCount?: number;
   backgroundProcessCount?: number;
 }
 
@@ -28,6 +29,7 @@ export const ContextSummaryDisplay: React.FC<ContextSummaryDisplayProps> = ({
   blockedMcpServers,
   ideContext,
   skillCount,
+  activeSkillCount = 0,
   backgroundProcessCount = 0,
 }) => {
   const mcpServerCount = Object.keys(mcpServers || {}).length;
@@ -40,6 +42,7 @@ export const ContextSummaryDisplay: React.FC<ContextSummaryDisplayProps> = ({
     blockedMcpServerCount === 0 &&
     openFileCount === 0 &&
     skillCount === 0 &&
+    activeSkillCount === 0 &&
     backgroundProcessCount === 0
   ) {
     return null;
@@ -103,11 +106,19 @@ export const ContextSummaryDisplay: React.FC<ContextSummaryDisplayProps> = ({
     }`;
   })();
 
+  const activeSkillText = (() => {
+    if (activeSkillCount === 0) {
+      return '';
+    }
+    return `${activeSkillCount} active skill${activeSkillCount > 1 ? 's' : ''}`;
+  })();
+
   const summaryParts = [
     openFilesText,
     geminiMdText,
     mcpText,
     skillText,
+    activeSkillText,
     backgroundText,
   ].filter(Boolean);
 

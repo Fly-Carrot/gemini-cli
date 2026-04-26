@@ -32,6 +32,7 @@ import { docsCommand } from '../ui/commands/docsCommand.js';
 import { directoryCommand } from '../ui/commands/directoryCommand.js';
 import { editorCommand } from '../ui/commands/editorCommand.js';
 import { extensionsCommand } from '../ui/commands/extensionsCommand.js';
+import { fabricCommand } from '../ui/commands/fabricCommand.js';
 import { footerCommand } from '../ui/commands/footerCommand.js';
 import { helpCommand } from '../ui/commands/helpCommand.js';
 import { shortcutsCommand } from '../ui/commands/shortcutsCommand.js';
@@ -51,6 +52,7 @@ import { profileCommand } from '../ui/commands/profileCommand.js';
 import { quitCommand } from '../ui/commands/quitCommand.js';
 import { restoreCommand } from '../ui/commands/restoreCommand.js';
 import { resumeCommand } from '../ui/commands/resumeCommand.js';
+import { runtimeCommand } from '../ui/commands/runtimeCommand.js';
 import { statsCommand } from '../ui/commands/statsCommand.js';
 import { themeCommand } from '../ui/commands/themeCommand.js';
 import { toolsCommand } from '../ui/commands/toolsCommand.js';
@@ -135,6 +137,7 @@ export class BuiltinCommandLoader implements ICommandLoader {
       docsCommand,
       directoryCommand,
       editorCommand,
+      fabricCommand,
       ...(this.config?.getExtensionsEnabled() === false
         ? [
             {
@@ -196,6 +199,7 @@ export class BuiltinCommandLoader implements ICommandLoader {
         ...resumeCommand,
         subCommands: addDebugToChatResumeSubCommands(resumeCommand.subCommands),
       },
+      runtimeCommand,
       statsCommand,
       themeCommand,
       toolsCommand,

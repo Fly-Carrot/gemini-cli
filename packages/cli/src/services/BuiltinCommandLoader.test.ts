@@ -122,6 +122,9 @@ vi.mock('../ui/commands/toolsCommand.js', () => ({ toolsCommand: {} }));
 vi.mock('../ui/commands/skillsCommand.js', () => ({
   skillsCommand: { name: 'skills' },
 }));
+vi.mock('../ui/commands/runtimeCommand.js', () => ({
+  runtimeCommand: { name: 'runtime' },
+}));
 vi.mock('../ui/commands/planCommand.js', async () => {
   const { CommandKind } = await import('../ui/commands/types.js');
   return {

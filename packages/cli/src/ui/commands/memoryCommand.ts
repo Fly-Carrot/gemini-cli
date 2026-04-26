@@ -11,7 +11,7 @@ import {
   refreshMemory,
   showMemory,
 } from '@google/gemini-cli-core';
-import { MessageType } from '../types.js';
+import { type HistoryItemInfo, MessageType } from '../types.js';
 import {
   CommandKind,
   type OpenCustomDialogActionReturn,
@@ -19,6 +19,18 @@ import {
   type SlashCommandActionReturn,
 } from './types.js';
 import { SkillInboxDialog } from '../components/SkillInboxDialog.js';
+import { SharedFabricRegistry } from '../../services/sharedFabricRegistry.js';
+
+function getSharedFabricRegistry(context: {
+  services: { settings: { workspace?: { path?: string } } };
+}): SharedFabricRegistry {
+  return new SharedFabricRegistry({
+    workspaceRoot:
+      context.services.settings.workspace?.path ||
+      process.env['GEMINI2_SHARED_FABRIC_WORKSPACE'] ||
+      process.cwd(),
+  });
+}
 
 export const memoryCommand: SlashCommand = {
   name: 'memory',
@@ -125,6 +137,67 @@ export const memoryCommand: SlashCommand = {
           },
           Date.now(),
         );
+      },
+    },
+    {
+      name: 'team',
+      description: 'Show layered team memory lanes and shared-fabric overlay',
+      kind: CommandKind.BUILT_IN,
+      autoExecute: true,
+      action: async (context): Promise<void | SlashCommandActionReturn> => {
+        const config = context.services.agentContext?.config;
+        if (!config) {
+          return {
+            type: 'message',
+            messageType: 'error',
+            content: 'Config not loaded.',
+          };
+        }
+
+        const memoryManager = config.getMemoryContextManager();
+        const loadedPaths = memoryManager
+          ? Array.from(memoryManager.getLoadedPaths())
+          : config.getGeminiMdFilePaths();
+        const extensionMemory = memoryManager?.getExtensionMemory() ?? '';
+        const userProjectMemory = memoryManager?.getUserProjectMemory() ?? '';
+        const sharedFabricStatus =
+          await getSharedFabricRegistry(context).getStatus();
+        const memoryInfo: HistoryItemInfo = {
+          type: MessageType.INFO,
+          text: `Team memory lanes loaded from ${loadedPaths.length} file(s).`,
+          secondaryText: [
+            `global ${config.getGlobalMemory().length}c`,
+            `extension ${extensionMemory.length}c`,
+            `project ${config.getEnvironmentMemory().length}c`,
+            `user-project ${userProjectMemory.length}c`,
+          ].join(' · '),
+        };
+
+        context.ui.addItem(memoryInfo);
+        context.ui.addItem({
+          type: sharedFabricStatus.workspaceOverlayExists
+            ? MessageType.INFO
+            : MessageType.WARNING,
+          text: sharedFabricStatus.workspaceOverlayExists
+            ? 'Shared-fabric question-profile overlay is available to team memory.'
+            : 'Shared-fabric question-profile overlay is missing from team memory.',
+        });
+        context.ui.addItem({
+          type: MessageType.INFO,
+          text: sharedFabricStatus.workspaceOverlayPath,
+        } as HistoryItemInfo);
+        if (loadedPaths.length > 0) {
+          context.ui.addItem({
+            type: MessageType.INFO,
+            text: `Loaded memory paths: ${loadedPaths.slice(0, 5).join(', ')}`,
+            secondaryText:
+              loadedPaths.length > 5
+                ? `${loadedPaths.length - 5} additional paths are currently loaded.`
+                : undefined,
+          } as HistoryItemInfo);
+        }
+
+        return undefined;
       },
     },
     {

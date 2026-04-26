@@ -101,6 +101,7 @@ import path from 'node:path';
 import { useSessionStats } from '../contexts/SessionContext.js';
 import { useKeypress } from './useKeypress.js';
 import type { LoadedSettings } from '../../config/settings.js';
+import { SharedFabricAutoRouter } from '../../services/sharedFabricAutoRouter.js';
 
 type ToolResponseWithParts = ToolCallResponseInfo & {
   llmContent?: PartListUnion;
@@ -242,6 +243,7 @@ export const useGeminiStream = (
   const suppressedToolErrorCountRef = useRef(0);
   const suppressedToolErrorNoteShownRef = useRef(false);
   const lowVerbosityFailureNoteShownRef = useRef(false);
+  const reportedSkillActivationsRef = useRef<Set<string>>(new Set());
   const abortControllerRef = useRef<AbortController | null>(null);
   const turnCancelledRef = useRef(false);
   const activeQueryIdRef = useRef<string | null>(null);
@@ -257,6 +259,10 @@ export const useGeminiStream = (
 
   const [lastGeminiActivityTime, setLastGeminiActivityTime] =
     useState<number>(0);
+  const sharedFabricAutoRouter = useMemo(
+    () => new SharedFabricAutoRouter(config, geminiClient),
+    [config, geminiClient],
+  );
   const [pushedToolCallIds, pushedToolCallIdsRef, setPushedToolCallIds] =
     useStateAndRef<Set<string>>(new Set());
   const [_isFirstToolInGroup, isFirstToolInGroupRef, setIsFirstToolInGroup] =
@@ -1011,7 +1017,21 @@ export const useGeminiStream = (
             { type: MessageType.USER, text: trimmedQuery },
             userMessageTimestamp,
           );
-          localQueryToSendToGemini = trimmedQuery;
+          const autoRouted = await sharedFabricAutoRouter.preparePrompt(
+            trimmedQuery,
+            abortSignal,
+          );
+          for (const notice of autoRouted.notices) {
+            addItem(
+              {
+                type: MessageType.INFO,
+                text: notice.text,
+                secondaryText: notice.secondaryText,
+              } as HistoryItemInfo,
+              userMessageTimestamp,
+            );
+          }
+          localQueryToSendToGemini = autoRouted.queryToSend;
         }
       } else {
         // It's a function response (PartListUnion that isn't a string)
@@ -1036,6 +1056,7 @@ export const useGeminiStream = (
       shellModeActive,
       scheduleToolCalls,
       settings,
+      sharedFabricAutoRouter,
     ],
   );
 
@@ -1890,6 +1911,27 @@ export const useGeminiStream = (
       );
 
       for (const toolCall of completedAndReadyToSubmitTools) {
+        if (
+          toolCall.request.name === ACTIVATE_SKILL_TOOL_NAME &&
+          toolCall.status === 'success' &&
+          !reportedSkillActivationsRef.current.has(toolCall.request.callId)
+        ) {
+          reportedSkillActivationsRef.current.add(toolCall.request.callId);
+          const requestedSkillName = toolCall.request.args['name'];
+          const skillName =
+            typeof requestedSkillName === 'string'
+              ? requestedSkillName
+              : 'unknown-skill';
+          const activeSkill = config.getSkillManager().getSkill(skillName);
+          addItem({
+            type: MessageType.INFO,
+            text: `Activated skill: ${skillName}`,
+            secondaryText: activeSkill
+              ? `Source: ${activeSkill.location}. Run /skills active to inspect active guidance.`
+              : 'Run /skills active to inspect active guidance.',
+          } as HistoryItemInfo);
+        }
+
         const backgroundedTool = getBackgroundedToolInfo(toolCall);
         if (backgroundedTool) {
           registerBackgroundTask(
@@ -2037,6 +2079,7 @@ export const useGeminiStream = (
       addItem,
       registerBackgroundTask,
       consumeUserHint,
+      config,
       isLowErrorVerbosity,
       maybeAddSuppressedToolErrorNote,
       maybeAddLowVerbosityFailureNote,

@@ -28,6 +28,7 @@ export const StatusDisplay: React.FC<StatusDisplayProps> = ({
   }
 
   if (!settings.merged.ui.hideContextSummary && !hideContextSummary) {
+    const skillManager = config.getSkillManager();
     return (
       <ContextSummaryDisplay
         ideContext={uiState.ideContextState}
@@ -37,7 +38,12 @@ export const StatusDisplay: React.FC<StatusDisplayProps> = ({
         blockedMcpServers={
           config.getMcpClientManager()?.getBlockedMcpServers() ?? []
         }
-        skillCount={config.getSkillManager().getDisplayableSkills().length}
+        skillCount={skillManager.getDisplayableSkills().length}
+        activeSkillCount={
+          skillManager
+            .getAllSkills()
+            .filter((skill) => skillManager.isSkillActive(skill.name)).length
+        }
         backgroundProcessCount={uiState.backgroundTaskCount}
       />
     );

@@ -64,7 +64,9 @@ const createMockConfig = (overrides = {}) => ({
   })),
   getSkillManager: vi.fn().mockImplementation(() => ({
     getSkills: vi.fn(() => ['skill1', 'skill2']),
+    getAllSkills: vi.fn(() => ['skill1', 'skill2'].map((name) => ({ name }))),
     getDisplayableSkills: vi.fn(() => ['skill1', 'skill2']),
+    isSkillActive: vi.fn(() => false),
   })),
   ...overrides,
 });

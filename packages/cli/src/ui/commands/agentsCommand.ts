@@ -4,13 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { AGENT_TOOL_NAME } from '@google/gemini-cli-core';
 import type {
   SlashCommand,
   CommandContext,
   SlashCommandActionReturn,
 } from './types.js';
 import { CommandKind } from './types.js';
-import { MessageType, type HistoryItemAgentsList } from '../types.js';
+import {
+  MessageType,
+  type HistoryItemAgentsList,
+  type HistoryItemInfo,
+} from '../types.js';
 import { SettingScope } from '../../config/settings.js';
 import { disableAgent, enableAgent } from '../../utils/agentSettings.js';
 import { renderAgentActionFeedback } from '../../utils/agentUtils.js';
@@ -298,6 +303,188 @@ function completeAllAgents(context: CommandContext, partialArg: string) {
   return allAgents.filter((name: string) => name.startsWith(partialArg));
 }
 
+function normalize(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function tokenize(value: string): string[] {
+  return normalize(value)
+    .split(/[^a-z0-9\u4e00-\u9fff-]+/i)
+    .filter(Boolean);
+}
+
+async function recommendAction(
+  context: CommandContext,
+  args: string,
+): Promise<SlashCommandActionReturn | void> {
+  const config = context.services.agentContext?.config;
+  if (!config) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Config not loaded.',
+    };
+  }
+
+  const query = args.trim();
+  if (!query) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Usage: /agents recommend <query>',
+    };
+  }
+
+  const agentRegistry = config.getAgentRegistry();
+  if (!agentRegistry) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Agent registry not found.',
+    };
+  }
+
+  const queryTokens = tokenize(query);
+  const queryNormalized = normalize(query);
+  const ranked = agentRegistry
+    .getAllDefinitions()
+    .map((definition) => {
+      const name = normalize(definition.name);
+      const displayName = normalize(definition.displayName || '');
+      const description = normalize(definition.description || '');
+
+      let score = 0;
+      if (name === queryNormalized || displayName === queryNormalized) {
+        score += 10;
+      }
+
+      for (const token of queryTokens) {
+        if (name.includes(token)) score += 4;
+        if (displayName.includes(token)) score += 3;
+        if (description.includes(token)) score += 2;
+      }
+
+      return {
+        definition,
+        score,
+      };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map(({ definition }) => ({
+      name: definition.name,
+      displayName: definition.displayName,
+      description: definition.description,
+      kind: definition.kind,
+    }));
+
+  if (ranked.length === 0) {
+    return {
+      type: 'message',
+      messageType: 'info',
+      content: `No agent recommendations were found for "${query}".`,
+    };
+  }
+
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Recommended ${ranked.length} agent${ranked.length === 1 ? '' : 's'} for "${query}".`,
+    secondaryText:
+      'Use /agents task <agent-name> <prompt> to fork one of these as a focused subagent task.',
+  } as HistoryItemInfo);
+  context.ui.addItem({
+    type: MessageType.AGENTS_LIST,
+    agents: ranked,
+  } as HistoryItemAgentsList);
+}
+
+async function taskAction(
+  context: CommandContext,
+  args: string,
+): Promise<SlashCommandActionReturn | void> {
+  const config = context.services.agentContext?.config;
+  if (!config) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Config not loaded.',
+    };
+  }
+
+  const trimmedArgs = args.trim();
+  if (!trimmedArgs) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Usage: /agents task <agent-name> <prompt>',
+    };
+  }
+
+  const splitIndex = trimmedArgs.indexOf(' ');
+  if (splitIndex === -1) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Usage: /agents task <agent-name> <prompt>',
+    };
+  }
+
+  const agentName = trimmedArgs.slice(0, splitIndex).trim();
+  const prompt = trimmedArgs.slice(splitIndex + 1).trim();
+  if (!agentName || !prompt) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Usage: /agents task <agent-name> <prompt>',
+    };
+  }
+
+  const agentRegistry = config.getAgentRegistry();
+  if (!agentRegistry) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Agent registry not found.',
+    };
+  }
+
+  const definition =
+    agentRegistry.getDefinition(agentName) ||
+    agentRegistry.getDiscoveredDefinition(agentName);
+  if (!definition) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: `Agent '${agentName}' not found.`,
+    };
+  }
+
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Forking task to agent "${agentName}".`,
+    secondaryText:
+      'This uses the native invoke_agent tool, so the work runs as an explicit subagent task instead of hidden prompt steering.',
+  } as HistoryItemInfo);
+
+  return {
+    type: 'tool',
+    toolName: AGENT_TOOL_NAME,
+    toolArgs: {
+      agent_name: agentName,
+      prompt,
+    },
+  };
+}
+
+function completeAgentTask(context: CommandContext, partialArg: string) {
+  const trimmed = partialArg.trimStart();
+  if (!trimmed || !trimmed.includes(' ')) {
+    return completeAllAgents(context, trimmed);
+  }
+  return [];
+}
+
 const enableCommand: SlashCommand = {
   name: 'enable',
   description: 'Enable a disabled agent',
@@ -323,6 +510,23 @@ const configCommand: SlashCommand = {
   autoExecute: false,
   action: configAction,
   completion: completeAllAgents,
+};
+
+const recommendCommand: SlashCommand = {
+  name: 'recommend',
+  description: 'Recommend agents for a task',
+  kind: CommandKind.BUILT_IN,
+  autoExecute: false,
+  action: recommendAction,
+};
+
+const taskCommand: SlashCommand = {
+  name: 'task',
+  description: 'Fork a task to a subagent',
+  kind: CommandKind.BUILT_IN,
+  autoExecute: false,
+  action: taskAction,
+  completion: completeAgentTask,
 };
 
 const agentsReloadCommand: SlashCommand = {
@@ -366,6 +570,8 @@ export const agentsCommand: SlashCommand = {
     enableCommand,
     disableCommand,
     configCommand,
+    recommendCommand,
+    taskCommand,
   ],
   action: async (context: CommandContext, args) =>
     // Default to list if no subcommand is provided

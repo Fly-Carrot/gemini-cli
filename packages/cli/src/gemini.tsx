@@ -26,7 +26,6 @@ import {
   shouldEnterAlternateScreen,
   startupProfiler,
   ExitCodes,
-  SessionStartSource,
   SessionEndReason,
   ValidationCancelledError,
   ValidationRequiredError,
@@ -75,6 +74,10 @@ import {
   initializeApp,
   type InitializationResult,
 } from './core/initializer.js';
+import {
+  SessionOrchestrator,
+  prepareNonInteractiveInput,
+} from './core/sessionOrchestrator.js';
 import { validateAuthMethod } from './config/auth.js';
 import { runAcpClient } from './acp/acpClient.js';
 import { validateNonInteractiveAuth } from './validateNonInterActiveAuth.js';
@@ -638,10 +641,6 @@ export async function main() {
       await getOauthClient(settings.merged.security.auth.selectedType, config);
     }
 
-    if (config.getAcpMode()) {
-      return runAcpClient(config, settings, argv);
-    }
-
     let input = config.getQuestion();
     const useAlternateBuffer = shouldEnterAlternateScreen(
       isAlternateBufferEnabled(config),
@@ -667,106 +666,91 @@ export async function main() {
       }
     }
 
-    // Render UI, passing necessary config values. Check that there is no command line question.
-    if (config.isInteractive()) {
-      // Earlier initialization phases (like TerminalCapabilityManager resolving
-      // or authWithWeb) may have added and removed 'data' listeners on process.stdin.
-      // When the listener count drops to 0, Node.js implicitly pauses the stream buffer.
-      // React Ink's useInput hooks will silently fail to receive keystrokes if the stream remains paused.
-      if (process.stdin.isTTY) {
-        process.stdin.resume();
-      }
-
-      await startInteractiveUI(
-        config,
-        settings,
-        startupWarnings,
-        process.cwd(),
-        resumedSessionData,
-        initializationResult,
-      );
-      return;
-    }
-
-    await config.initialize();
-    startupProfiler.flush(config);
-
-    // If not a TTY, read from stdin
-    // This is for cases where the user pipes input directly into the command
-    let stdinData: string | undefined = undefined;
-    if (!process.stdin.isTTY) {
-      stdinData = await readStdin();
-      if (stdinData) {
-        input = input ? `${stdinData}\n\n${input}` : stdinData;
-      }
-    }
-
-    // Fire SessionStart hook through MessageBus (only if hooks are enabled)
-    // Must be called AFTER config.initialize() to ensure HookRegistry is loaded
-    const sessionStartSource = resumedSessionData
-      ? SessionStartSource.Resume
-      : SessionStartSource.Startup;
-
-    const hookSystem = config?.getHookSystem();
-    if (hookSystem) {
-      const result = await hookSystem.fireSessionStartEvent(sessionStartSource);
-
-      if (result) {
-        if (result.systemMessage) {
-          writeToStderr(result.systemMessage + '\n');
+    const sessionOrchestrator = new SessionOrchestrator(config);
+    await sessionOrchestrator.run({
+      onAcp: async () => {
+        await runAcpClient(config, settings, argv);
+      },
+      onInteractive: async () => {
+        // Earlier initialization phases (like TerminalCapabilityManager resolving
+        // or authWithWeb) may have added and removed 'data' listeners on process.stdin.
+        // When the listener count drops to 0, Node.js implicitly pauses the stream buffer.
+        // React Ink's useInput hooks will silently fail to receive keystrokes if the stream remains paused.
+        if (process.stdin.isTTY) {
+          process.stdin.resume();
         }
-        const additionalContext = result.getAdditionalContext();
-        if (additionalContext) {
-          // Prepend context to input (System Context -> Stdin -> Question)
-          const wrappedContext = `<hook_context>${additionalContext}</hook_context>`;
-          input = input ? `${wrappedContext}\n\n${input}` : wrappedContext;
+
+        await startInteractiveUI(
+          config,
+          settings,
+          startupWarnings,
+          process.cwd(),
+          resumedSessionData,
+          initializationResult,
+        );
+      },
+      onNonInteractive: async () => {
+        await config.initialize();
+        startupProfiler.flush(config);
+
+        const preparedInput = await prepareNonInteractiveInput({
+          config,
+          initialInput: input,
+          isStdinTTY: process.stdin.isTTY,
+          readStdin,
+          resumedSessionData,
+          onSystemMessage: (message) => {
+            writeToStderr(message + '\n');
+          },
+        });
+        input = preparedInput.input;
+
+        if (!input) {
+          debugLogger.error(
+            `No input provided via stdin. Input can be provided by piping data into gemini or using the --prompt option.`,
+          );
+          await runExitCleanup();
+          process.exit(ExitCodes.FATAL_INPUT_ERROR);
         }
-      }
-    }
 
-    if (!input) {
-      debugLogger.error(
-        `No input provided via stdin. Input can be provided by piping data into gemini or using the --prompt option.`,
-      );
-      await runExitCleanup();
-      process.exit(ExitCodes.FATAL_INPUT_ERROR);
-    }
+        const prompt_id = sessionId;
+        logUserPrompt(
+          config,
+          new UserPromptEvent(
+            input.length,
+            prompt_id,
+            config.getContentGeneratorConfig()?.authType,
+            input,
+          ),
+        );
 
-    const prompt_id = sessionId;
-    logUserPrompt(
-      config,
-      new UserPromptEvent(
-        input.length,
-        prompt_id,
-        config.getContentGeneratorConfig()?.authType,
-        input,
-      ),
-    );
+        const authType = await validateNonInteractiveAuth(
+          settings.merged.security.auth.selectedType,
+          settings.merged.security.auth.useExternal,
+          config,
+          settings,
+        );
+        await config.refreshAuth(authType);
 
-    const authType = await validateNonInteractiveAuth(
-      settings.merged.security.auth.selectedType,
-      settings.merged.security.auth.useExternal,
-      config,
-      settings,
-    );
-    await config.refreshAuth(authType);
+        if (config.getDebugMode()) {
+          debugLogger.log('Session ID: %s', sessionId);
+        }
 
-    if (config.getDebugMode()) {
-      debugLogger.log('Session ID: %s', sessionId);
-    }
+        initializeOutputListenersAndFlush();
 
-    initializeOutputListenersAndFlush();
-
-    await runNonInteractive({
-      config,
-      settings,
-      input,
-      prompt_id,
-      resumedSessionData,
+        await runNonInteractive({
+          config,
+          settings,
+          input,
+          prompt_id,
+          resumedSessionData,
+        });
+        // Call cleanup before process.exit, which causes cleanup to not run
+        await runExitCleanup();
+        process.exit(ExitCodes.SUCCESS);
+      },
     });
-    // Call cleanup before process.exit, which causes cleanup to not run
-    await runExitCleanup();
-    process.exit(ExitCodes.SUCCESS);
+    return;
   }
 }
 

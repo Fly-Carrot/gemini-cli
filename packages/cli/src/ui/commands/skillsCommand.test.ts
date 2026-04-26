@@ -5,17 +5,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { skillsCommand } from './skillsCommand.js';
-import { MessageType, type HistoryItemSkillsList } from '../types.js';
-import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
-import type { CommandContext } from './types.js';
-import type { Config, SkillDefinition } from '@google/gemini-cli-core';
-import {
-  SettingScope,
-  type LoadedSettings,
-  createTestMergedSettings,
-  type MergedSettings,
-} from '../../config/settings.js';
 
 vi.mock('../../utils/skillUtils.js', async (importOriginal) => {
   const actual =
@@ -36,7 +25,19 @@ vi.mock('../../config/extensions/consent.js', async (importOriginal) => {
   };
 });
 
+import { skillsCommand } from './skillsCommand.js';
+import { MessageType, type HistoryItemSkillsList } from '../types.js';
+import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
+import type { CommandContext } from './types.js';
+import type { Config, SkillDefinition } from '@google/gemini-cli-core';
+import {
+  SettingScope,
+  type LoadedSettings,
+  createTestMergedSettings,
+  type MergedSettings,
+} from '../../config/settings.js';
 import { linkSkill } from '../../utils/skillUtils.js';
+import { SharedFabricRegistry } from '../../services/sharedFabricRegistry.js';
 
 vi.mock('../../config/settings.js', async (importOriginal) => {
   const actual =
@@ -49,10 +50,11 @@ vi.mock('../../config/settings.js', async (importOriginal) => {
 
 describe('skillsCommand', () => {
   let context: CommandContext;
+  let skills: Array<SkillDefinition & { isBuiltin?: boolean }>;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    const skills = [
+    skills = [
       {
         name: 'skill1',
         description: 'desc1',
@@ -66,18 +68,77 @@ describe('skillsCommand', () => {
         body: 'body2',
       },
     ];
+
+    vi.spyOn(SharedFabricRegistry.prototype, 'searchSkills').mockResolvedValue([
+      {
+        name: 'shared-skill',
+        description: 'shared desc',
+        location: '/shared/skill/SKILL.md',
+        body: '',
+      },
+    ]);
+    vi.spyOn(
+      SharedFabricRegistry.prototype,
+      'recommendSkills',
+    ).mockResolvedValue({
+      domain: {
+        label: '刑部 · 审计（Quality, Testing & Security）',
+        summary: '代码审查、安全扫描、测试策略。',
+        keywords: ['review', 'audit'],
+        representativeSkills: ['code-reviewer'],
+      },
+      skills: [
+        {
+          name: 'code-reviewer',
+          description: 'Review code changes and risks',
+          location: '/shared/code-reviewer/SKILL.md',
+          body: '',
+        },
+      ],
+    });
+    vi.spyOn(
+      SharedFabricRegistry.prototype,
+      'findSkillByName',
+    ).mockResolvedValue({
+      name: 'shared-skill',
+      description: 'shared desc',
+      location: '/shared/skill/SKILL.md',
+      body: '',
+    });
+    vi.spyOn(
+      SharedFabricRegistry.prototype,
+      'loadSkillDefinition',
+    ).mockResolvedValue({
+      name: 'shared-skill',
+      description: 'shared desc',
+      location: '/shared/skill/SKILL.md',
+      body: 'skill body',
+    });
+    vi.spyOn(
+      SharedFabricRegistry.prototype,
+      'completeSkillNames',
+    ).mockResolvedValue(['shared-skill']);
+
     context = createMockCommandContext({
       services: {
         agentContext: {
           getSkillManager: vi.fn().mockReturnValue({
-            getAllSkills: vi.fn().mockReturnValue(skills),
-            getSkills: vi.fn().mockReturnValue(skills),
+            getAllSkills: vi.fn().mockImplementation(() => skills),
+            getSkills: vi.fn().mockImplementation(() => skills),
             isAdminEnabled: vi.fn().mockReturnValue(true),
             getSkill: vi
               .fn()
               .mockImplementation(
                 (name: string) => skills.find((s) => s.name === name) ?? null,
               ),
+            isSkillActive: vi
+              .fn()
+              .mockImplementation((name: string) => name === 'skill1'),
+            addSkills: vi
+              .fn()
+              .mockImplementation((loadedSkills: SkillDefinition[]) => {
+                skills.push(...loadedSkills);
+              }),
           }),
           getContentGenerator: vi.fn(),
           get config() {
@@ -208,6 +269,102 @@ describe('skillsCommand', () => {
       .mocked(context.ui.addItem)
       .mock.calls.at(-1)![0] as HistoryItemSkillsList;
     expect(lastCall.skills).toHaveLength(2);
+  });
+
+  it('should list active skills', async () => {
+    const activeCmd = skillsCommand.subCommands!.find(
+      (s) => s.name === 'active',
+    )!;
+
+    await activeCmd.action!(context, '');
+
+    expect(context.ui.addItem).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: MessageType.INFO,
+        text: '1 active skill loaded into this session.',
+      }),
+    );
+    expect(context.ui.addItem).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: MessageType.SKILLS_LIST,
+        skills: [expect.objectContaining({ name: 'skill1' })],
+      }),
+    );
+  });
+
+  it('should search shared-fabric skills', async () => {
+    const searchCmd = skillsCommand.subCommands!.find(
+      (s) => s.name === 'search',
+    )!;
+
+    await searchCmd.action!(context, 'review auth flow');
+
+    expect(SharedFabricRegistry.prototype.searchSkills).toHaveBeenCalledWith(
+      'review auth flow',
+      12,
+    );
+    expect(context.ui.addItem).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: MessageType.INFO,
+      }),
+    );
+    expect(context.ui.addItem).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: MessageType.SKILLS_LIST,
+        skills: [expect.objectContaining({ name: 'shared-skill' })],
+      }),
+    );
+  });
+
+  it('should recommend routed shared-fabric skills', async () => {
+    const recommendCmd = skillsCommand.subCommands!.find(
+      (s) => s.name === 'recommend',
+    )!;
+
+    await recommendCmd.action!(context, '帮我做代码审查');
+
+    expect(SharedFabricRegistry.prototype.recommendSkills).toHaveBeenCalledWith(
+      '帮我做代码审查',
+      8,
+    );
+    expect(context.ui.addItem).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: MessageType.INFO,
+        text: expect.stringContaining('Routed to 刑部'),
+      }),
+    );
+    expect(context.ui.addItem).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: MessageType.SKILLS_LIST,
+        skills: [expect.objectContaining({ name: 'code-reviewer' })],
+      }),
+    );
+  });
+
+  it('should load and activate a shared-fabric skill on demand', async () => {
+    const useCmd = skillsCommand.subCommands!.find((s) => s.name === 'use')!;
+
+    const result = await useCmd.action!(context, 'shared-skill inspect tests');
+
+    expect(SharedFabricRegistry.prototype.findSkillByName).toHaveBeenCalledWith(
+      'shared-skill',
+    );
+    expect(
+      SharedFabricRegistry.prototype.loadSkillDefinition,
+    ).toHaveBeenCalledWith('shared-skill');
+    expect(context.ui.reloadCommands).toHaveBeenCalled();
+    expect(result).toEqual({
+      type: 'tool',
+      toolName: 'activate_skill',
+      toolArgs: { name: 'shared-skill' },
+      postSubmitPrompt: 'inspect tests',
+    });
   });
 
   describe('link', () => {
