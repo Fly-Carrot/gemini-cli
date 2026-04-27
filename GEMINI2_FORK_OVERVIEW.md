@@ -44,3 +44,16 @@ while grafting in selected workflow-runtime ideas:
 This fork already provides a stronger project runtime than upstream Gemini CLI,
 but it is still intentionally Gemini-first. It does not attempt to fully clone
 Claude Code's daemon model or autonomous subagent runtime.
+
+## Upstream maintenance
+
+This fork includes an upstream compatibility workflow:
+
+- `.github/workflows/gemini2-upstream-compat.yml`
+- `scripts/gemini2-upstream-compat-check.sh`
+
+The workflow does not auto-merge upstream blindly. Instead, it fetches the
+latest official `google-gemini/gemini-cli` `main`, rebases the current Gemini-2
+fork in a temporary worktree, and runs targeted compatibility checks plus
+package builds. This keeps upstream drift visible without turning maintenance
+into an unsafe silent auto-update.

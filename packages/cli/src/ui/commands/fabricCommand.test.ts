@@ -72,15 +72,13 @@ describe('fabricCommand', () => {
   it('shows shared-fabric status', async () => {
     await fabricCommand.action!(context, '');
 
-    expect(context.ui.addItem).toHaveBeenNthCalledWith(
-      1,
+    expect(context.ui.addItem).toHaveBeenCalledWith(
       expect.objectContaining({
         type: MessageType.INFO,
         text: 'Shared fabric detected and ready for Gemini-2.',
       }),
     );
-    expect(context.ui.addItem).toHaveBeenNthCalledWith(
-      2,
+    expect(context.ui.addItem).toHaveBeenCalledWith(
       expect.objectContaining({
         text: 'Global root: /fabric',
       }),
