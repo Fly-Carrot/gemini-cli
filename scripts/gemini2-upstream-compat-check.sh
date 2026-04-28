@@ -7,6 +7,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 UPSTREAM_REMOTE="${UPSTREAM_REMOTE:-upstream}"
 UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/google-gemini/gemini-cli.git}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
+GIT_IDENTITY_NAME="${GIT_IDENTITY_NAME:-github-actions[bot]}"
+GIT_IDENTITY_EMAIL="${GIT_IDENTITY_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
 
 CHECK_BRANCH="gemini2-upstream-check-$(date +%Y%m%d%H%M%S)"
 WORKTREE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gemini2-upstream-check.XXXXXX")"
@@ -41,6 +43,9 @@ fi
 git -C "$REPO_ROOT" worktree add -b "$CHECK_BRANCH" "$WORKTREE_DIR" HEAD >/dev/null
 
 pushd "$WORKTREE_DIR" >/dev/null
+
+git config user.name "$GIT_IDENTITY_NAME"
+git config user.email "$GIT_IDENTITY_EMAIL"
 
 if [[ ! -e "$WORKTREE_DIR/node_modules" && -d "$REPO_ROOT/node_modules" ]]; then
   ln -s "$REPO_ROOT/node_modules" "$WORKTREE_DIR/node_modules"
