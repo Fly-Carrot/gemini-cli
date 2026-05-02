@@ -28,6 +28,21 @@ export const ALL_ITEMS = [
     description: 'Current model identifier',
   },
   {
+    id: 'loop-status',
+    header: 'loop',
+    description: 'Current long-task loop mode and progress',
+  },
+  {
+    id: 'skill-status',
+    header: 'skills',
+    description: 'Current skill automation mode and active usage',
+  },
+  {
+    id: 'agent-status',
+    header: 'agents',
+    description: 'Current agent automation mode and available agents',
+  },
+  {
     id: 'context-used',
     header: 'context',
     description: 'Percentage of context window used',
@@ -71,6 +86,9 @@ export const DEFAULT_ORDER = [
   'git-branch',
   'sandbox',
   'model-name',
+  'loop-status',
+  'skill-status',
+  'agent-status',
   'context-used',
   'quota',
   'memory-usage',
@@ -88,6 +106,9 @@ export function deriveItemsFromLegacySettings(
     'git-branch',
     'sandbox',
     'model-name',
+    'loop-status',
+    'skill-status',
+    'agent-status',
     'quota',
   ];
   const items = [...defaults];

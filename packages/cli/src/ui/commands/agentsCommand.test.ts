@@ -25,14 +25,21 @@ vi.mock('../../utils/agentUtils.js', () => ({
 describe('agentsCommand', () => {
   let mockContext: ReturnType<typeof createMockCommandContext>;
   let mockConfig: {
+    storage: {
+      getProjectTempDir: ReturnType<typeof vi.fn>;
+    };
     getAgentRegistry: ReturnType<typeof vi.fn>;
     config: Config;
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    const strategyTempDir = `/tmp/gemini-agents-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     mockConfig = {
+      storage: {
+        getProjectTempDir: vi.fn().mockReturnValue(strategyTempDir),
+      },
       getAgentRegistry: vi.fn().mockReturnValue({
         getAllDefinitions: vi.fn().mockReturnValue([]),
         getAllAgentNames: vi.fn().mockReturnValue([]),
@@ -85,7 +92,7 @@ describe('agentsCommand', () => {
     });
   });
 
-  it('should call addItem with correct agents list', async () => {
+  it('should show agent automation status by default', async () => {
     const mockAgents = [
       {
         name: 'agent1',
@@ -106,8 +113,43 @@ describe('agentsCommand', () => {
 
     expect(mockContext.ui.addItem).toHaveBeenCalledWith(
       expect.objectContaining({
+        type: MessageType.INFO,
+        text: 'Agents mode: auto.',
+      }),
+    );
+  });
+
+  it('should list agents when list subcommand is used', async () => {
+    const mockAgents = [
+      {
+        name: 'agent1',
+        displayName: 'Agent One',
+        description: 'desc1',
+        kind: 'local',
+      },
+    ];
+    mockConfig.getAgentRegistry().getAllDefinitions.mockReturnValue(mockAgents);
+
+    const result = await agentsCommand.subCommands!.find(
+      (cmd) => cmd.name === 'list',
+    )!.action!(mockContext, '');
+
+    expect(result).toBeUndefined();
+    expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+      expect.objectContaining({
         type: MessageType.AGENTS_LIST,
         agents: mockAgents,
+      }),
+    );
+  });
+
+  it('should switch to full agent mode directly', async () => {
+    await agentsCommand.action!(mockContext, 'full');
+
+    expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: MessageType.INFO,
+        text: 'Agent automation set to full.',
       }),
     );
   });

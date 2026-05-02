@@ -113,4 +113,35 @@ describe('experiments', () => {
     expect(getClientMetadata).toHaveBeenCalledTimes(1);
     expect(mockServer.listExperiments).toHaveBeenCalledTimes(1);
   });
+
+  it('should degrade gracefully when the server fetch fails', async () => {
+    const { getExperiments } = await import('./experiments.js');
+    vi.mocked(mockServer.listExperiments).mockRejectedValue(
+      new Error('network timeout'),
+    );
+
+    await expect(getExperiments(mockServer)).resolves.toEqual({
+      flags: {},
+      experimentIds: [],
+    });
+  });
+
+  it('should retry fetching after a previous failure', async () => {
+    const { getExperiments } = await import('./experiments.js');
+    vi.mocked(mockServer.listExperiments)
+      .mockRejectedValueOnce(new Error('network timeout'))
+      .mockResolvedValueOnce({
+        experimentIds: [42],
+      } as ListExperimentsResponse);
+
+    await expect(getExperiments(mockServer)).resolves.toEqual({
+      flags: {},
+      experimentIds: [],
+    });
+    await expect(getExperiments(mockServer)).resolves.toEqual({
+      flags: {},
+      experimentIds: [42],
+    });
+    expect(mockServer.listExperiments).toHaveBeenCalledTimes(2);
+  });
 });

@@ -36,6 +36,11 @@ import {
   SharedFabricRegistry,
   type SharedFabricSkillCandidate,
 } from '../../services/sharedFabricRegistry.js';
+import {
+  AutomationStrategyService,
+  describeSkillsMode,
+  type SkillAutomationMode,
+} from '../../services/automationStrategyService.js';
 
 function getSharedFabricRegistry(
   context: CommandContext,
@@ -49,6 +54,17 @@ function getSharedFabricRegistry(
       process.env['GEMINI2_SHARED_FABRIC_WORKSPACE'] ||
       process.cwd(),
   });
+}
+
+function getAutomationStrategyService(
+  context: CommandContext,
+): AutomationStrategyService | null {
+  const config = context.services.agentContext?.config;
+  return config ? new AutomationStrategyService(config) : null;
+}
+
+function isSkillsMode(value: string): value is SkillAutomationMode {
+  return value === 'manual' || value === 'auto' || value === 'full';
 }
 
 function toSkillsListItem(
@@ -135,6 +151,65 @@ async function activeAction(
       'These are the skills whose guidance is currently available to the model.',
   } as HistoryItemInfo);
   context.ui.addItem(toSkillsListItem(activeSkills, true));
+}
+
+async function modeAction(
+  context: CommandContext,
+  mode: SkillAutomationMode,
+): Promise<void | SlashCommandActionReturn> {
+  const strategyService = getAutomationStrategyService(context);
+  if (!strategyService) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Config not loaded.',
+    };
+  }
+
+  await strategyService.setSkillsMode(mode);
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Skill automation set to ${mode}.`,
+    secondaryText: describeSkillsMode(mode),
+  } as HistoryItemInfo);
+}
+
+async function statusAction(
+  context: CommandContext,
+): Promise<void | SlashCommandActionReturn> {
+  const strategyService = getAutomationStrategyService(context);
+  const skillManager = getSkillManager(context);
+  if (!strategyService || !skillManager) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Could not retrieve skill configuration.',
+    };
+  }
+
+  const strategy = await strategyService.getState();
+  const activeSkills = skillManager
+    .getAllSkills()
+    .filter((skill) => skillManager.isSkillActive(skill.name));
+
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Skills mode: ${strategy.skillsMode}.`,
+    secondaryText: describeSkillsMode(strategy.skillsMode),
+  } as HistoryItemInfo);
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text:
+      activeSkills.length > 0
+        ? `${activeSkills.length} skill${
+            activeSkills.length > 1 ? 's are' : ' is'
+          } active in this session.`
+        : 'No skills are currently active in this session.',
+    secondaryText:
+      strategy.skillsMode === 'manual'
+        ? 'Use /skills use <name> when you want to bring a specific skill into the conversation.'
+        : 'Gemini-2 will follow this policy when deciding whether to load skills automatically.',
+  } as HistoryItemInfo);
 }
 
 async function searchAction(
@@ -601,10 +676,31 @@ async function useCompletion(
 export const skillsCommand: SlashCommand = {
   name: 'skills',
   description:
-    'Inspect, search, load, enable, disable, or reload Gemini CLI skills. Usage: /skills [list | active | search <query> | recommend <query> | use <name> [task] | disable <name> | enable <name> | reload]',
+    'Set skill automation or inspect, search, load, enable, disable, or reload Gemini CLI skills. Usage: /skills [manual | auto | full | active | search <query> | recommend <query> | use <name> [task] | disable <name> | enable <name> | reload]',
   kind: CommandKind.BUILT_IN,
   autoExecute: false,
   subCommands: [
+    {
+      name: 'manual',
+      description:
+        'Turn off automatic skill loading and choose skills yourself.',
+      kind: CommandKind.BUILT_IN,
+      action: (context) => modeAction(context, 'manual'),
+    },
+    {
+      name: 'auto',
+      description:
+        'Let Gemini-2 decide when to auto-load high-confidence skills.',
+      kind: CommandKind.BUILT_IN,
+      action: (context) => modeAction(context, 'auto'),
+    },
+    {
+      name: 'full',
+      description:
+        'Require Gemini-2 to choose suitable skills before working on a task.',
+      kind: CommandKind.BUILT_IN,
+      action: (context) => modeAction(context, 'full'),
+    },
     {
       name: 'list',
       description:
@@ -673,12 +769,19 @@ export const skillsCommand: SlashCommand = {
     },
   ],
   action: async (context, args) => {
-    if (args) {
-      const parsed = parseSlashCommand(`/${args}`, skillsCommand.subCommands!);
+    const trimmedArgs = args.trim();
+    if (isSkillsMode(trimmedArgs)) {
+      return modeAction(context, trimmedArgs);
+    }
+    if (trimmedArgs) {
+      const parsed = parseSlashCommand(
+        `/${trimmedArgs}`,
+        skillsCommand.subCommands!,
+      );
       if (parsed.commandToExecute?.action) {
         return parsed.commandToExecute.action(context, parsed.args);
       }
     }
-    return listAction(context, args);
+    return statusAction(context);
   },
 };

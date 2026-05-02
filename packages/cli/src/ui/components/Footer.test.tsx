@@ -6,7 +6,12 @@
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderWithProviders } from '../../test-utils/render.js';
-import { Footer } from './Footer.js';
+import {
+  Footer,
+  formatAgentStatus,
+  formatLoopStatus,
+  formatSkillStatus,
+} from './Footer.js';
 import { createMockSettings } from '../../test-utils/settings.js';
 import {
   type Config,
@@ -24,6 +29,18 @@ const normalizeFrame = (frame: string | undefined) => {
 const { mocks } = vi.hoisted(() => ({
   mocks: {
     isDevelopment: false,
+    loopSnapshot: {
+      statePath: '/tmp/gemini-2-loop.json',
+      exists: false,
+      status: 'idle',
+      iteration: 0,
+      autoRunEnabled: false,
+    },
+    automationStrategy: {
+      loopMode: 'off',
+      skillsMode: 'auto',
+      agentsMode: 'auto',
+    },
   },
 }));
 
@@ -51,6 +68,35 @@ vi.mock('@google/gemini-cli-core', async (importOriginal) => {
     },
   };
 });
+
+vi.mock('../../services/loopRuntimeService.js', () => ({
+  LoopRuntimeService: class {
+    async getSnapshot() {
+      return mocks.loopSnapshot;
+    }
+  },
+}));
+
+vi.mock(
+  '../../services/automationStrategyService.js',
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import('../../services/automationStrategyService.js')
+      >();
+    return {
+      ...actual,
+      AutomationStrategyService: class {
+        async getState() {
+          return {
+            ...mocks.automationStrategy,
+            updatedAt: '2026-04-30T00:00:00.000Z',
+          };
+        }
+      },
+    };
+  },
+);
 
 const defaultProps = {
   model: 'gemini-pro',
@@ -140,6 +186,18 @@ describe('<Footer />', () => {
     vi.stubEnv('GEMINI_CLI_HOME', path.join(root, 'Users', 'test'));
     vi.stubEnv('SANDBOX', '');
     vi.stubEnv('SEATBELT_PROFILE', '');
+    mocks.loopSnapshot = {
+      statePath: '/tmp/gemini-2-loop.json',
+      exists: false,
+      status: 'idle',
+      iteration: 0,
+      autoRunEnabled: false,
+    };
+    mocks.automationStrategy = {
+      loopMode: 'off',
+      skillsMode: 'auto',
+      agentsMode: 'auto',
+    };
   });
 
   afterEach(() => {
@@ -259,6 +317,54 @@ describe('<Footer />', () => {
     expect(lastFrame()).toContain(defaultProps.model);
     expect(lastFrame()).toMatch(/\d+% used/);
     unmount();
+  });
+
+  it('formats loop status in a user-friendly way', () => {
+    expect(
+      formatLoopStatus(
+        {
+          statePath: '/tmp/gemini-2-loop.json',
+          exists: true,
+          status: 'active',
+          iteration: 3,
+          maxIterations: 12,
+          autoRunEnabled: true,
+        },
+        'auto',
+      ),
+    ).toBe('auto 3/12');
+    expect(
+      formatLoopStatus(
+        {
+          statePath: '/tmp/gemini-2-loop.json',
+          exists: true,
+          status: 'paused',
+          iteration: 4,
+          maxIterations: 12,
+          autoRunEnabled: false,
+        },
+        'full',
+      ),
+    ).toBe('full paused');
+    expect(
+      formatLoopStatus(
+        {
+          statePath: '/tmp/gemini-2-loop.json',
+          exists: false,
+          status: 'idle',
+          iteration: 0,
+        },
+        'off',
+      ),
+    ).toBe('off');
+  });
+
+  it('formats skill and agent status in a user-friendly way', () => {
+    expect(formatSkillStatus('auto', 0, 0)).toBe('auto');
+    expect(formatSkillStatus('manual', 0, 12)).toBe('manual');
+    expect(formatSkillStatus('full', 2, 12)).toBe('full 2 on');
+    expect(formatAgentStatus('auto', 0)).toBe('auto');
+    expect(formatAgentStatus('full', 48)).toBe('full 48 ready');
   });
 
   it('displays the usage indicator when usage is low', async () => {

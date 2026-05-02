@@ -5,18 +5,34 @@
  */
 
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   loadSkillFromFile,
   type SkillDefinition,
 } from '@google/gemini-cli-core';
 
-const DEFAULT_SHARED_FABRIC_ROOT =
-  '/Users/david_chen/Antigravity_Skills/global-agent-fabric';
-const DEFAULT_SKILLS_INDEX_PATH =
-  '/Users/david_chen/Antigravity_Skills/awesome-skills/skills_index.json';
-const DEFAULT_DOMAIN_MAP_PATH =
-  '/Users/david_chen/.gemini/antigravity/global_workflows/skills-domain-map.md';
+function getDefaultSharedFabricRoot(): string {
+  return path.join(os.homedir(), 'Antigravity_Skills', 'global-agent-fabric');
+}
+
+function getDefaultSkillsIndexPath(globalRoot: string): string {
+  return path.join(
+    path.dirname(globalRoot),
+    'awesome-skills',
+    'skills_index.json',
+  );
+}
+
+function getDefaultDomainMapPath(): string {
+  return path.join(
+    os.homedir(),
+    '.gemini',
+    'antigravity',
+    'global_workflows',
+    'skills-domain-map.md',
+  );
+}
 
 interface SharedFabricSkillSource {
   id: string;
@@ -41,7 +57,9 @@ export interface SharedFabricSkillCandidate extends SkillDefinition {
   risk?: string;
   sourceId?: string;
   sourceType?: string;
+  catalogSource?: string;
   score?: number;
+  trustedRoot?: string;
 }
 
 interface SharedFabricDomainRoute {
@@ -135,6 +153,21 @@ function uniqueByName<T extends { name: string }>(items: T[]): T[] {
   return unique;
 }
 
+function isWithinTrustedRoot(
+  candidatePath: string,
+  trustedRoot: string,
+): boolean {
+  const relative = path.relative(trustedRoot, candidatePath);
+  return (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  );
+}
+
+function defined<T>(value: T | null): value is T {
+  return value !== null;
+}
+
 export class SharedFabricRegistry {
   readonly globalRoot: string;
   readonly workspaceRoot: string;
@@ -154,7 +187,7 @@ export class SharedFabricRegistry {
       options.globalRoot ||
       process.env['GEMINI2_SHARED_FABRIC_ROOT'] ||
       process.env['AGF_GLOBAL_ROOT'] ||
-      DEFAULT_SHARED_FABRIC_ROOT;
+      getDefaultSharedFabricRoot();
     this.workspaceRoot =
       options.workspaceRoot ||
       process.env['GEMINI2_SHARED_FABRIC_WORKSPACE'] ||
@@ -171,8 +204,16 @@ export class SharedFabricRegistry {
       'runtime-map.yaml',
     );
     this.memoryRoutesPath = path.join(this.globalRoot, 'memory', 'routes.yaml');
-    this.domainMapPath = options.domainMapPath || DEFAULT_DOMAIN_MAP_PATH;
-    this.skillsIndexPath = options.skillsIndexPath || DEFAULT_SKILLS_INDEX_PATH;
+    this.domainMapPath =
+      options.domainMapPath ||
+      process.env['GEMINI2_SHARED_FABRIC_DOMAIN_MAP'] ||
+      process.env['AGF_DOMAIN_MAP_PATH'] ||
+      getDefaultDomainMapPath();
+    this.skillsIndexPath =
+      options.skillsIndexPath ||
+      process.env['GEMINI2_SHARED_FABRIC_SKILLS_INDEX'] ||
+      process.env['AGF_SKILLS_INDEX_PATH'] ||
+      getDefaultSkillsIndexPath(this.globalRoot);
     this.workspaceOverlayPath = path.join(
       this.workspaceRoot,
       '.agents',
@@ -292,11 +333,12 @@ export class SharedFabricRegistry {
       .slice(0, limit);
 
     if (scored.length > 0) {
-      return Promise.all(
+      const candidates = await Promise.all(
         scored.map((candidate) =>
           this.toSkillCandidate(candidate.entry, candidate.score),
         ),
       );
+      return candidates.filter(defined);
     }
 
     if (!matchedDomain) {
@@ -347,6 +389,15 @@ export class SharedFabricRegistry {
       return null;
     }
 
+    if (
+      !(await this.isTrustedSkillLocation(
+        candidate.location,
+        candidate.trustedRoot,
+      ))
+    ) {
+      return null;
+    }
+
     return loadSkillFromFile(candidate.location);
   }
 
@@ -370,15 +421,19 @@ export class SharedFabricRegistry {
   ): Promise<SharedFabricSkillCandidate[]> {
     const catalog = await this.loadCatalog();
     const representative = uniqueByName(
-      await Promise.all(
-        domain.representativeSkills
-          .map((name) =>
-            catalog.find((entry) => normalize(entry.name) === normalize(name)),
-          )
-          .filter((entry): entry is SharedFabricSkillCatalogEntry => !!entry)
-          .slice(0, limit)
-          .map((entry) => this.toSkillCandidate(entry, 8)),
-      ),
+      (
+        await Promise.all(
+          domain.representativeSkills
+            .map((name) =>
+              catalog.find(
+                (entry) => normalize(entry.name) === normalize(name),
+              ),
+            )
+            .filter((entry): entry is SharedFabricSkillCatalogEntry => !!entry)
+            .slice(0, limit)
+            .map((entry) => this.toSkillCandidate(entry, 8)),
+        )
+      ).filter(defined),
     );
 
     return uniqueByName([...representative, ...searchResults]).slice(0, limit);
@@ -389,15 +444,17 @@ export class SharedFabricRegistry {
     limit: number,
   ): Promise<SharedFabricSkillCandidate[]> {
     const catalog = await this.loadCatalog();
-    const representative = await Promise.all(
-      domain.representativeSkills
-        .map((name) =>
-          catalog.find((entry) => normalize(entry.name) === normalize(name)),
-        )
-        .filter((entry): entry is SharedFabricSkillCatalogEntry => !!entry)
-        .slice(0, limit)
-        .map((entry) => this.toSkillCandidate(entry, 6)),
-    );
+    const representative = (
+      await Promise.all(
+        domain.representativeSkills
+          .map((name) =>
+            catalog.find((entry) => normalize(entry.name) === normalize(name)),
+          )
+          .filter((entry): entry is SharedFabricSkillCatalogEntry => !!entry)
+          .slice(0, limit)
+          .map((entry) => this.toSkillCandidate(entry, 6)),
+      )
+    ).filter(defined);
 
     return representative;
   }
@@ -438,7 +495,7 @@ export class SharedFabricRegistry {
   private async toSkillCandidate(
     entry: SharedFabricSkillCatalogEntry,
     score: number,
-  ): Promise<SharedFabricSkillCandidate> {
+  ): Promise<SharedFabricSkillCandidate | null> {
     const sources = await this.loadSources();
     const source =
       sources.find(
@@ -447,38 +504,70 @@ export class SharedFabricRegistry {
           candidate.type.includes('skill'),
       ) || sources.find((candidate) => candidate.id === 'awesome-skills');
 
-    const location = this.resolveSkillLocation(entry.path, source?.path);
+    const resolved = this.resolveSkillLocation(entry.path, source?.path);
+    if (!resolved) {
+      return null;
+    }
 
     return {
       name: entry.name,
       description: entry.description || '',
-      location,
+      location: resolved.location,
       body: '',
       category: entry.category,
       risk: entry.risk,
       sourceId: source?.id,
       sourceType: source?.type,
+      catalogSource: entry.source,
       score,
+      trustedRoot: resolved.trustedRoot,
     };
   }
 
   private resolveSkillLocation(
     indexedPath: string,
     sourcePath: string | undefined,
-  ): string {
+  ): { location: string; trustedRoot: string } | null {
     if (!sourcePath) {
-      return path.join(
-        path.dirname(this.skillsIndexPath),
-        indexedPath,
-        'SKILL.md',
-      );
+      const trustedRoot = path.resolve(path.dirname(this.skillsIndexPath));
+      const location = path.resolve(trustedRoot, indexedPath, 'SKILL.md');
+      return isWithinTrustedRoot(location, trustedRoot)
+        ? { location, trustedRoot }
+        : null;
     }
 
-    const sourceDir =
+    const trustedRoot = path.resolve(
       path.basename(sourcePath) === 'skills'
         ? path.dirname(sourcePath)
-        : sourcePath;
-    return path.join(sourceDir, indexedPath, 'SKILL.md');
+        : sourcePath,
+    );
+    const location = path.resolve(trustedRoot, indexedPath, 'SKILL.md');
+    return isWithinTrustedRoot(location, trustedRoot)
+      ? { location, trustedRoot }
+      : null;
+  }
+
+  private async isTrustedSkillLocation(
+    location: string,
+    trustedRoot: string | undefined,
+  ): Promise<boolean> {
+    const lexicalRoot = path.resolve(
+      trustedRoot || path.dirname(this.skillsIndexPath),
+    );
+    const lexicalLocation = path.resolve(location);
+    if (!isWithinTrustedRoot(lexicalLocation, lexicalRoot)) {
+      return false;
+    }
+
+    try {
+      const [realRoot, realLocation] = await Promise.all([
+        fs.realpath(lexicalRoot),
+        fs.realpath(lexicalLocation),
+      ]);
+      return isWithinTrustedRoot(realLocation, realRoot);
+    } catch {
+      return false;
+    }
   }
 
   private async loadSources(): Promise<SharedFabricSkillSource[]> {

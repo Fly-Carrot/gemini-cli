@@ -19,6 +19,23 @@ import {
 import { SettingScope } from '../../config/settings.js';
 import { disableAgent, enableAgent } from '../../utils/agentSettings.js';
 import { renderAgentActionFeedback } from '../../utils/agentUtils.js';
+import { parseSlashCommand } from '../../utils/commands.js';
+import {
+  AutomationStrategyService,
+  describeAgentsMode,
+  type AgentAutomationMode,
+} from '../../services/automationStrategyService.js';
+
+function getAutomationStrategyService(
+  context: CommandContext,
+): AutomationStrategyService | null {
+  const config = context.services.agentContext?.config;
+  return config ? new AutomationStrategyService(config) : null;
+}
+
+function isAgentsMode(value: string): value is AgentAutomationMode {
+  return value === 'manual' || value === 'auto' || value === 'full';
+}
 
 const agentsListCommand: SlashCommand = {
   name: 'list',
@@ -61,6 +78,72 @@ const agentsListCommand: SlashCommand = {
     return;
   },
 };
+
+async function modeAction(
+  context: CommandContext,
+  mode: AgentAutomationMode,
+): Promise<SlashCommandActionReturn | void> {
+  const strategyService = getAutomationStrategyService(context);
+  if (!strategyService) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Config not loaded.',
+    };
+  }
+
+  await strategyService.setAgentsMode(mode);
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Agent automation set to ${mode}.`,
+    secondaryText: describeAgentsMode(mode),
+  } as HistoryItemInfo);
+}
+
+async function statusAction(
+  context: CommandContext,
+): Promise<SlashCommandActionReturn | void> {
+  const config = context.services.agentContext?.config;
+  const strategyService = getAutomationStrategyService(context);
+  if (!config || !strategyService) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Config not loaded.',
+    };
+  }
+
+  const agentRegistry = config.getAgentRegistry();
+  if (!agentRegistry) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: 'Agent registry not found.',
+    };
+  }
+
+  const strategy = await strategyService.getState();
+  const agents = agentRegistry.getAllDefinitions().map((def) => ({
+    name: def.name,
+    displayName: def.displayName,
+    description: def.description,
+    kind: def.kind,
+  }));
+
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Agents mode: ${strategy.agentsMode}.`,
+    secondaryText: describeAgentsMode(strategy.agentsMode),
+  } as HistoryItemInfo);
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `${agents.length} agent${agents.length === 1 ? '' : 's'} available.`,
+    secondaryText:
+      strategy.agentsMode === 'manual'
+        ? 'Use /agents task <agent-name> <prompt> when you want to delegate explicitly.'
+        : 'Gemini-2 will follow this policy when deciding whether to delegate to subagents.',
+  } as HistoryItemInfo);
+}
 
 async function enableAction(
   context: CommandContext,
@@ -562,9 +645,32 @@ const agentsReloadCommand: SlashCommand = {
 
 export const agentsCommand: SlashCommand = {
   name: 'agents',
-  description: 'Manage agents',
+  description:
+    'Set agent automation or manage agents. Usage: /agents [manual | auto | full | list | recommend | task]',
   kind: CommandKind.BUILT_IN,
   subCommands: [
+    {
+      name: 'manual',
+      description: 'Turn off automatic subagent routing and delegate manually.',
+      kind: CommandKind.BUILT_IN,
+      autoExecute: false,
+      action: (context) => modeAction(context, 'manual'),
+    },
+    {
+      name: 'auto',
+      description: 'Let Gemini-2 decide when to recommend or use subagents.',
+      kind: CommandKind.BUILT_IN,
+      autoExecute: false,
+      action: (context) => modeAction(context, 'auto'),
+    },
+    {
+      name: 'full',
+      description:
+        'Require Gemini-2 to choose and use suitable subagents when available.',
+      kind: CommandKind.BUILT_IN,
+      autoExecute: false,
+      action: (context) => modeAction(context, 'full'),
+    },
     agentsListCommand,
     agentsReloadCommand,
     enableCommand,
@@ -573,7 +679,20 @@ export const agentsCommand: SlashCommand = {
     recommendCommand,
     taskCommand,
   ],
-  action: async (context: CommandContext, args) =>
-    // Default to list if no subcommand is provided
-    agentsListCommand.action!(context, args),
+  action: async (context: CommandContext, args) => {
+    const trimmedArgs = args.trim();
+    if (isAgentsMode(trimmedArgs)) {
+      return modeAction(context, trimmedArgs);
+    }
+    if (trimmedArgs) {
+      const parsed = parseSlashCommand(
+        `/${trimmedArgs}`,
+        agentsCommand.subCommands!,
+      );
+      if (parsed.commandToExecute?.action) {
+        return parsed.commandToExecute.action(context, parsed.args);
+      }
+    }
+    return statusAction(context);
+  },
 };

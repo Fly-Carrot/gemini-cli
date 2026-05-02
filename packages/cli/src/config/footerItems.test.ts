@@ -23,6 +23,9 @@ describe('footerItems', () => {
         'git-branch',
         'sandbox',
         'model-name',
+        'loop-status',
+        'skill-status',
+        'agent-status',
         'quota',
       ]);
     });
@@ -90,6 +93,9 @@ describe('footerItems', () => {
       expect(items).toEqual([
         'git-branch',
         'sandbox',
+        'loop-status',
+        'skill-status',
+        'agent-status',
         'context-used',
         'memory-usage',
       ]);
@@ -116,6 +122,9 @@ describe('footerItems', () => {
         'model-name',
         'git-branch',
         'sandbox',
+        'loop-status',
+        'skill-status',
+        'agent-status',
         'context-used',
         'quota',
         'memory-usage',

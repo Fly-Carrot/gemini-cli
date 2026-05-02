@@ -60,6 +60,8 @@ export const Composer = ({ isFocused = true }: { isFocused?: boolean }) => {
 
   useEffect(() => {
     if (hasPendingActionRequired) {
+      // Keep approval prompts discoverable without yanking the viewport away
+      // from users who intentionally scrolled up to inspect earlier output.
       appEvents.emit(AppEvent.ScrollToBottom);
     }
   }, [hasPendingActionRequired]);

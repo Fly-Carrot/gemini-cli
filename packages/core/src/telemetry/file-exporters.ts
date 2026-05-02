@@ -5,6 +5,7 @@
  */
 
 import * as fs from 'node:fs';
+import { once } from 'node:events';
 import { ExportResultCode, type ExportResult } from '@opentelemetry/core';
 import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base';
 import type {
@@ -33,6 +34,14 @@ class FileExporter {
     return new Promise((resolve) => {
       this.writeStream.end(resolve);
     });
+  }
+
+  async forceFlush(): Promise<void> {
+    if (this.writeStream.destroyed || !this.writeStream.writableNeedDrain) {
+      return Promise.resolve();
+    }
+
+    await once(this.writeStream, 'drain');
   }
 }
 
@@ -87,7 +96,7 @@ export class FileMetricExporter
     return AggregationTemporality.CUMULATIVE;
   }
 
-  async forceFlush(): Promise<void> {
-    return Promise.resolve();
+  override async forceFlush(): Promise<void> {
+    return super.forceFlush();
   }
 }

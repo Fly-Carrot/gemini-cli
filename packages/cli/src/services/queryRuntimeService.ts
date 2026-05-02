@@ -12,6 +12,11 @@ import {
   type MemoryContextManager,
 } from '@google/gemini-cli-core';
 import type { SessionStatsState } from '../ui/contexts/SessionContext.js';
+import { AutomationStrategyService } from './automationStrategyService.js';
+import {
+  LoopRuntimeService,
+  type LoopRuntimeSnapshot,
+} from './loopRuntimeService.js';
 import { SharedFabricRegistry } from './sharedFabricRegistry.js';
 
 export interface QueryRuntimeSnapshot {
@@ -49,6 +54,12 @@ export interface QueryRuntimeSnapshot {
     workspaceRoot: string;
     globalRoot: string;
   };
+  loop: LoopRuntimeSnapshot;
+  automation: {
+    loopMode: 'off' | 'auto' | 'full';
+    skillsMode: 'manual' | 'auto' | 'full';
+    agentsMode: 'manual' | 'auto' | 'full';
+  };
   bridge: {
     snapshotPath: string;
     updatedAt: string;
@@ -72,6 +83,7 @@ function getMemoryManager(config: Config): MemoryContextManager | undefined {
 
 export class QueryRuntimeService {
   private readonly sharedFabricRegistry: SharedFabricRegistry;
+  private readonly loopRuntimeService: LoopRuntimeService;
 
   constructor(
     private readonly config: Config,
@@ -81,6 +93,10 @@ export class QueryRuntimeService {
     this.sharedFabricRegistry = new SharedFabricRegistry({
       workspaceRoot: options.workspaceRoot || config.getWorkingDir(),
     });
+    this.loopRuntimeService = new LoopRuntimeService(
+      config,
+      options.workspaceRoot || config.getWorkingDir(),
+    );
   }
 
   async collectStatus(): Promise<QueryRuntimeSnapshot> {
@@ -128,6 +144,10 @@ export class QueryRuntimeService {
       'query-runtime-bridge.json',
     );
     const sharedFabricStatus = await this.sharedFabricRegistry.getStatus();
+    const loopSnapshot = await this.loopRuntimeService.getSnapshot();
+    const automationStrategy = await new AutomationStrategyService(
+      this.config,
+    ).getState();
 
     return {
       sessionId: this.sessionStats.sessionId || this.config.getSessionId(),
@@ -163,6 +183,12 @@ export class QueryRuntimeService {
         workspaceOverlayExists: sharedFabricStatus.workspaceOverlayExists,
         workspaceRoot: sharedFabricStatus.workspaceRoot,
         globalRoot: sharedFabricStatus.globalRoot,
+      },
+      loop: loopSnapshot,
+      automation: {
+        loopMode: automationStrategy.loopMode,
+        skillsMode: automationStrategy.skillsMode,
+        agentsMode: automationStrategy.agentsMode,
       },
       bridge: {
         snapshotPath: bridgeSnapshotPath,

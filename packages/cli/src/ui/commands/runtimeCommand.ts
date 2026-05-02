@@ -95,10 +95,27 @@ async function statusAction(
   } as HistoryItemInfo);
   context.ui.addItem({
     type: MessageType.INFO,
-    text: `Skills and agents: ${snapshot.activeSkillNames.length} active skills · ${snapshot.discoveredAgentNames.length} discovered agents · ${snapshot.checkpoints.count} checkpoints`,
+    text: `Automation: loop ${snapshot.automation.loopMode} · skills ${snapshot.automation.skillsMode} · agents ${snapshot.automation.agentsMode}.`,
+    secondaryText: `Runtime has ${snapshot.activeSkillNames.length} active skills loaded · ${snapshot.discoveredAgentNames.length} agents registered · ${snapshot.checkpoints.count} checkpoints.`,
+  } as HistoryItemInfo);
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text: `Skills and agents: ${snapshot.activeSkillNames.length} active skills loaded · ${snapshot.discoveredAgentNames.length} agents registered · ${snapshot.checkpoints.count} checkpoints`,
     secondaryText: snapshot.activeSkillNames.length
-      ? `Active skills: ${snapshot.activeSkillNames.join(', ')}`
-      : 'Run /skills use <name> or /agents task <agent> <prompt> to activate richer runtime guidance.',
+      ? `Active skills: ${snapshot.activeSkillNames.join(', ')}. Registered agents are available definitions, not proof that a subagent is currently running.`
+      : 'Run /skills use <name> to load guidance, or /agents task <agent> <prompt> to explicitly fork a subagent task.',
+  } as HistoryItemInfo);
+  context.ui.addItem({
+    type: MessageType.INFO,
+    text:
+      snapshot.loop.status === 'idle'
+        ? 'Loop runtime: idle.'
+        : `Loop runtime: ${snapshot.loop.status} · iteration ${snapshot.loop.iteration}/${snapshot.loop.maxIterations ?? '?'}${snapshot.loop.autoRunEnabled ? ' · autorun on' : ''}.`,
+    secondaryText: snapshot.loop.goal
+      ? snapshot.loop.stopCategory
+        ? `${snapshot.loop.goal} · stop category: ${snapshot.loop.stopCategory}`
+        : snapshot.loop.goal
+      : 'Run /loop start <goal> to begin a long-horizon execution loop.',
   } as HistoryItemInfo);
 }
 

@@ -25,6 +25,7 @@ import { appEvents, AppEvent } from '../../utils/events.js';
 
 const MemoizedHistoryItemDisplay = memo(HistoryItemDisplay);
 const MemoizedAppHeader = memo(AppHeader);
+const AUTO_SCROLL_THRESHOLD_LINES = 2;
 
 // Limit Gemini messages to a very high number of lines to mitigate performance
 // issues in the worst case if we somehow get an enormous response from Gemini.
@@ -51,8 +52,23 @@ export const MainContent = () => {
   }, [showConfirmationQueue, confirmingToolCallId]);
 
   useEffect(() => {
-    const handleScroll = () => {
-      scrollableListRef.current?.scrollToEnd();
+    const handleScroll = (force = false) => {
+      const scrollState = scrollableListRef.current?.getScrollState();
+      if (!scrollState) {
+        return;
+      }
+
+      const maxScrollTop = Math.max(
+        0,
+        scrollState.scrollHeight - scrollState.innerHeight,
+      );
+      const isNearBottom =
+        maxScrollTop - Math.round(scrollState.scrollTop) <=
+        AUTO_SCROLL_THRESHOLD_LINES;
+
+      if (force || isNearBottom) {
+        scrollableListRef.current?.scrollToEnd();
+      }
     };
     appEvents.on(AppEvent.ScrollToBottom, handleScroll);
     return () => {

@@ -1816,7 +1816,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       if (keyMatchers[Command.TOGGLE_MOUSE_MODE](key)) {
         setMouseMode((prev) => !prev);
         if (mouseMode && !isAlternateBuffer) {
-          appEvents.emit(AppEvent.ScrollToBottom);
+          appEvents.emit(AppEvent.ScrollToBottom, true);
         }
         return true;
       }

@@ -56,8 +56,16 @@ export async function getExperiments(
     }
 
     const metadata = await getClientMetadata();
-    const response = await server.listExperiments(metadata);
-    return parseExperiments(response);
+    try {
+      const response = await server.listExperiments(metadata);
+      return parseExperiments(response);
+    } catch (error) {
+      // Experiment fetch is an optional startup enrichment. If the network is
+      // unavailable, degrade gracefully and allow later calls to retry.
+      experimentsPromise = undefined;
+      debugLogger.debug('Failed to fetch experiments from server', error);
+      return { flags: {}, experimentIds: [] };
+    }
   })();
   return experimentsPromise;
 }

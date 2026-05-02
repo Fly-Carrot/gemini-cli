@@ -102,6 +102,7 @@ import { useSessionStats } from '../contexts/SessionContext.js';
 import { useKeypress } from './useKeypress.js';
 import type { LoadedSettings } from '../../config/settings.js';
 import { SharedFabricAutoRouter } from '../../services/sharedFabricAutoRouter.js';
+import { LoopRuntimeService } from '../../services/loopRuntimeService.js';
 
 type ToolResponseWithParts = ToolCallResponseInfo & {
   llmContent?: PartListUnion;
@@ -263,6 +264,17 @@ export const useGeminiStream = (
     () => new SharedFabricAutoRouter(config, geminiClient),
     [config, geminiClient],
   );
+  const loopRuntimeService = useMemo(
+    () =>
+      new LoopRuntimeService(
+        config,
+        (settings.workspace as { path?: string } | undefined)?.path ||
+          process.env['GEMINI2_SHARED_FABRIC_WORKSPACE'] ||
+          process.cwd(),
+      ),
+    [config, settings.workspace],
+  );
+  const pendingLoopFollowupRef = useRef<string | null>(null);
   const [pushedToolCallIds, pushedToolCallIdsRef, setPushedToolCallIds] =
     useStateAndRef<Set<string>>(new Set());
   const [_isFirstToolInGroup, isFirstToolInGroupRef, setIsFirstToolInGroup] =
@@ -270,6 +282,14 @@ export const useGeminiStream = (
   const processedMemoryToolsRef = useRef<Set<string>>(new Set());
   const { startNewPrompt, getPromptCount } = useSessionStats();
   const logger = useLogger(config);
+  const submitQueryRef =
+    useRef<
+      (
+        query: PartListUnion,
+        options?: { isContinuation: boolean },
+        prompt_id?: string,
+      ) => Promise<void>
+    >(undefined);
   const gitService = useMemo(() => {
     if (!config.getProjectRoot()) {
       return;
@@ -1449,7 +1469,11 @@ export const useGeminiStream = (
       stream: AsyncIterable<GeminiEvent>,
       userMessageTimestamp: number,
       signal: AbortSignal,
-    ): Promise<StreamProcessingStatus> => {
+    ): Promise<{
+      status: StreamProcessingStatus;
+      responseText: string;
+      hadToolCalls: boolean;
+    }> => {
       let geminiMessageBuffer = '';
       const toolCallRequests: ToolCallRequestInfo[] = [];
       for await (const event of stream) {
@@ -1478,7 +1502,11 @@ export const useGeminiStream = (
             break;
           case ServerGeminiEventType.UserCancelled:
             handleUserCancelledEvent(userMessageTimestamp);
-            break;
+            return {
+              status: StreamProcessingStatus.UserCancelled,
+              responseText: geminiMessageBuffer,
+              hadToolCalls: toolCallRequests.length > 0,
+            };
           case ServerGeminiEventType.Error:
             handleErrorEvent(event.value, userMessageTimestamp);
             break;
@@ -1546,7 +1574,11 @@ export const useGeminiStream = (
         }
         await scheduleToolCalls(toolCallRequests, signal);
       }
-      return StreamProcessingStatus.Completed;
+      return {
+        status: StreamProcessingStatus.Completed,
+        responseText: geminiMessageBuffer,
+        hadToolCalls: toolCallRequests.length > 0,
+      };
     },
     [
       handleContentEvent,
@@ -1568,6 +1600,76 @@ export const useGeminiStream = (
       setPendingHistoryItem,
       setThought,
     ],
+  );
+
+  const maybeHandleLoopAutoRun = useCallback(
+    async (responseText: string, userMessageTimestamp: number) => {
+      const snapshot = await loopRuntimeService.getSnapshot();
+      if (!snapshot.exists || !snapshot.autoRunEnabled) {
+        return;
+      }
+
+      const outcome =
+        await loopRuntimeService.reconcileAssistantResponse(responseText);
+
+      switch (outcome.action) {
+        case 'continue':
+          pendingLoopFollowupRef.current = '/loop next';
+          {
+            const info: HistoryItemInfo = {
+              type: MessageType.INFO,
+              text: `Auto-running loop iteration ${outcome.state.iteration + 1}/${outcome.state.maxIterations}.`,
+              secondaryText:
+                outcome.summary ||
+                'Previous iteration finished cleanly; queuing the next one.',
+            };
+            addItem(info, userMessageTimestamp);
+          }
+          break;
+        case 'completed':
+          {
+            const info: HistoryItemInfo = {
+              type: MessageType.INFO,
+              text: `Loop auto-run completed after ${outcome.state.iteration} iterations.`,
+              secondaryText: outcome.summary || outcome.state.completionSummary,
+            };
+            addItem(info, userMessageTimestamp);
+          }
+          break;
+        case 'blocked':
+        case 'review':
+        case 'delegation':
+        case 'paused':
+          {
+            const info: HistoryItemInfo = {
+              type:
+                outcome.action === 'blocked' ||
+                outcome.action === 'review' ||
+                outcome.action === 'delegation'
+                  ? MessageType.WARNING
+                  : MessageType.INFO,
+              text:
+                outcome.action === 'review'
+                  ? `Loop auto-run paused for review: ${outcome.reason || 'review requested'}`
+                  : outcome.action === 'delegation'
+                    ? `Loop auto-run paused for delegation: ${outcome.reason || 'delegation required'}`
+                    : `Loop auto-run stopped: ${outcome.reason || 'unknown reason'}`,
+              secondaryText:
+                outcome.action === 'delegation'
+                  ? 'Use /agents recommend or /agents task to choose a subagent, then /loop resume or /loop run.'
+                  : outcome.summary ||
+                    'Use /loop resume or /loop run after reviewing the checkpoint.',
+            };
+            addItem(info, userMessageTimestamp);
+          }
+          break;
+        case 'idle':
+          break;
+        default:
+          break;
+      }
+    },
+    [addItem, loopRuntimeService],
   );
   const submitQuery = useCallback(
     async (
@@ -1662,19 +1764,27 @@ export const useGeminiStream = (
                 false,
                 query,
               );
-              const processingStatus = await processGeminiStreamEvents(
+              const processingResult = await processGeminiStreamEvents(
                 stream,
                 userMessageTimestamp,
                 abortSignal,
               );
 
-              if (processingStatus === StreamProcessingStatus.UserCancelled) {
+              if (
+                processingResult.status === StreamProcessingStatus.UserCancelled
+              ) {
                 return;
               }
 
               if (pendingHistoryItemRef.current) {
                 addItem(pendingHistoryItemRef.current, userMessageTimestamp);
                 setPendingHistoryItem(null);
+              }
+              if (!processingResult.hadToolCalls) {
+                await maybeHandleLoopAutoRun(
+                  processingResult.responseText,
+                  userMessageTimestamp,
+                );
               }
               if (loopDetectedRef.current) {
                 loopDetectedRef.current = false;
@@ -1751,6 +1861,7 @@ export const useGeminiStream = (
       setModelSwitchedFromQuotaError,
       prepareQueryForGemini,
       processGeminiStreamEvents,
+      maybeHandleLoopAutoRun,
       pendingHistoryItemRef,
       addItem,
       setPendingHistoryItem,
@@ -1768,6 +1879,19 @@ export const useGeminiStream = (
       setIsResponding,
     ],
   );
+  submitQueryRef.current = submitQuery;
+
+  useEffect(() => {
+    if (
+      streamingState === StreamingState.Idle &&
+      pendingLoopFollowupRef.current &&
+      submitQueryRef.current
+    ) {
+      const followup = pendingLoopFollowupRef.current;
+      pendingLoopFollowupRef.current = null;
+      void submitQueryRef.current(followup);
+    }
+  }, [streamingState]);
 
   const handleApprovalModeChange = useCallback(
     async (newApprovalMode: ApprovalMode) => {

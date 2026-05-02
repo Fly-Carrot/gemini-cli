@@ -95,6 +95,24 @@ describe('runtimeCommand', () => {
         workspaceRoot: '/workspace',
         globalRoot: '/fabric',
       },
+      loop: {
+        statePath: '/workspace/.gemini/tmp/loop-runtime.json',
+        exists: true,
+        status: 'active',
+        goal: 'Ship a stable release',
+        iteration: 3,
+        maxIterations: 12,
+        updatedAt: '2026-04-27T00:00:00.000Z',
+        lastSummary: 'Checkpoint complete',
+        stopCategory: 'review-required',
+        sessionId: 'session-1',
+        autoRunEnabled: true,
+      },
+      automation: {
+        loopMode: 'auto',
+        skillsMode: 'auto',
+        agentsMode: 'full',
+      },
       bridge: {
         snapshotPath: '/workspace/.gemini/tmp/query-runtime-bridge.json',
         updatedAt: '2026-04-27T00:00:00.000Z',
@@ -124,7 +142,22 @@ describe('runtimeCommand', () => {
     expect(context.ui.addItem).toHaveBeenNthCalledWith(
       4,
       expect.objectContaining({
+        text: 'Automation: loop auto · skills auto · agents full.',
+      }),
+    );
+    expect(context.ui.addItem).toHaveBeenNthCalledWith(
+      5,
+      expect.objectContaining({
         text: expect.stringContaining('Skills and agents: 2 active skills'),
+      }),
+    );
+    expect(context.ui.addItem).toHaveBeenNthCalledWith(
+      6,
+      expect.objectContaining({
+        text: 'Loop runtime: active · iteration 3/12 · autorun on.',
+        secondaryText: expect.stringContaining(
+          'stop category: review-required',
+        ),
       }),
     );
   });

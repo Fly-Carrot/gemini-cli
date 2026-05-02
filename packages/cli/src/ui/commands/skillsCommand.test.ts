@@ -54,6 +54,7 @@ describe('skillsCommand', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    const strategyTempDir = `/tmp/gemini-skills-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     skills = [
       {
         name: 'skill1',
@@ -122,6 +123,9 @@ describe('skillsCommand', () => {
     context = createMockCommandContext({
       services: {
         agentContext: {
+          storage: {
+            getProjectTempDir: vi.fn().mockReturnValue(strategyTempDir),
+          },
           getSkillManager: vi.fn().mockReturnValue({
             getAllSkills: vi.fn().mockImplementation(() => skills),
             getSkills: vi.fn().mockImplementation(() => skills),
@@ -159,29 +163,13 @@ describe('skillsCommand', () => {
     vi.restoreAllMocks();
   });
 
-  it('should add a SKILLS_LIST item to UI with descriptions by default', async () => {
+  it('should show skill automation status by default', async () => {
     await skillsCommand.action!(context, '');
 
     expect(context.ui.addItem).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: MessageType.SKILLS_LIST,
-        skills: [
-          {
-            name: 'skill1',
-            description: 'desc1',
-            disabled: undefined,
-            location: '/loc1',
-            body: 'body1',
-          },
-          {
-            name: 'skill2',
-            description: 'desc2',
-            disabled: undefined,
-            location: '/loc2',
-            body: 'body2',
-          },
-        ],
-        showDescriptions: true,
+        type: MessageType.INFO,
+        text: 'Skills mode: auto.',
       }),
     );
   });
@@ -210,6 +198,17 @@ describe('skillsCommand', () => {
           },
         ],
         showDescriptions: true,
+      }),
+    );
+  });
+
+  it('should switch to manual skill mode directly', async () => {
+    await skillsCommand.action!(context, 'manual');
+
+    expect(context.ui.addItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: MessageType.INFO,
+        text: 'Skill automation set to manual.',
       }),
     );
   });

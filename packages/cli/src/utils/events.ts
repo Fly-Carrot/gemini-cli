@@ -33,7 +33,7 @@ export interface AppEvents {
   [AppEvent.PasteTimeout]: never[];
   [AppEvent.TerminalBackground]: [string];
   [AppEvent.TransientMessage]: [TransientMessagePayload];
-  [AppEvent.ScrollToBottom]: never[];
+  [AppEvent.ScrollToBottom]: [boolean?];
 }
 
 export const appEvents = new EventEmitter<AppEvents>();

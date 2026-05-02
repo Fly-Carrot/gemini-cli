@@ -34,6 +34,17 @@ import {
   deriveItemsFromLegacySettings,
 } from '../../config/footerItems.js';
 import { isDevelopment } from '../../utils/installationInfo.js';
+import {
+  LoopRuntimeService,
+  type LoopRuntimeSnapshot,
+} from '../../services/loopRuntimeService.js';
+import {
+  AutomationStrategyService,
+  DEFAULT_AUTOMATION_STRATEGY,
+  type AgentAutomationMode,
+  type LoopAutomationMode,
+  type SkillAutomationMode,
+} from '../../services/automationStrategyService.js';
 
 interface CwdIndicatorProps {
   targetDir: string;
@@ -173,6 +184,52 @@ interface FooterColumn {
   isHighPriority: boolean;
 }
 
+const IDLE_LOOP_SNAPSHOT: LoopRuntimeSnapshot = {
+  statePath: '',
+  exists: false,
+  status: 'idle',
+  iteration: 0,
+};
+
+export function formatLoopStatus(
+  snapshot: LoopRuntimeSnapshot,
+  mode: LoopAutomationMode,
+): string {
+  switch (snapshot.status) {
+    case 'idle':
+      return mode;
+    case 'active':
+      return `${mode} ${snapshot.iteration}/${snapshot.maxIterations ?? '?'}`;
+    case 'paused':
+      return `${mode} paused`;
+    case 'completed':
+      return `${mode} done`;
+    default:
+      return mode;
+  }
+}
+
+export function formatSkillStatus(
+  mode: SkillAutomationMode,
+  activeSkillCount: number,
+  totalSkillCount: number,
+): string {
+  if (activeSkillCount <= 0 || totalSkillCount <= 0) {
+    return mode;
+  }
+  return `${mode} ${activeSkillCount} on`;
+}
+
+export function formatAgentStatus(
+  mode: AgentAutomationMode,
+  totalAgentCount: number,
+): string {
+  if (totalAgentCount <= 0) {
+    return mode;
+  }
+  return `${mode} ${totalAgentCount} ready`;
+}
+
 export const Footer: React.FC = () => {
   const uiState = useUIState();
   const quotaState = useQuotaState();
@@ -183,15 +240,13 @@ export const Footer: React.FC = () => {
 
   const authType = config.getContentGeneratorConfig()?.authType;
   const [email, setEmail] = useState<string | undefined>();
-
-  useEffect(() => {
-    if (authType) {
-      const userAccountManager = new UserAccountManager();
-      setEmail(userAccountManager.getCachedGoogleAccount() ?? undefined);
-    } else {
-      setEmail(undefined);
-    }
-  }, [authType]);
+  const [loopSnapshot, setLoopSnapshot] =
+    useState<LoopRuntimeSnapshot>(IDLE_LOOP_SNAPSHOT);
+  const [automationModes, setAutomationModes] = useState({
+    loopMode: DEFAULT_AUTOMATION_STRATEGY.loopMode,
+    skillsMode: DEFAULT_AUTOMATION_STRATEGY.skillsMode,
+    agentsMode: DEFAULT_AUTOMATION_STRATEGY.agentsMode,
+  });
 
   const {
     model,
@@ -219,7 +274,74 @@ export const Footer: React.FC = () => {
     terminalWidth: uiState.terminalWidth,
   };
 
+  useEffect(() => {
+    if (authType) {
+      const userAccountManager = new UserAccountManager();
+      setEmail(userAccountManager.getCachedGoogleAccount() ?? undefined);
+    } else {
+      setEmail(undefined);
+    }
+  }, [authType]);
+
+  useEffect(() => {
+    if (process.env['VITEST']) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshLoopSnapshot = async () => {
+      try {
+        const loopRuntime = new LoopRuntimeService(
+          config,
+          config.getTargetDir(),
+        );
+        const strategyService = new AutomationStrategyService(config);
+        const [snapshot, strategy] = await Promise.all([
+          loopRuntime.getSnapshot(),
+          strategyService.getState(),
+        ]);
+        if (!cancelled) {
+          setLoopSnapshot(snapshot);
+          setAutomationModes(strategy);
+        }
+      } catch {
+        if (!cancelled) {
+          setLoopSnapshot(IDLE_LOOP_SNAPSHOT);
+          setAutomationModes({
+            loopMode: DEFAULT_AUTOMATION_STRATEGY.loopMode,
+            skillsMode: DEFAULT_AUTOMATION_STRATEGY.skillsMode,
+            agentsMode: DEFAULT_AUTOMATION_STRATEGY.agentsMode,
+          });
+        }
+      }
+    };
+
+    void refreshLoopSnapshot();
+    const interval = setInterval(() => {
+      void refreshLoopSnapshot();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [config, targetDir]);
+
   const quotaStats = quotaState.stats;
+  const skillManager = config.getSkillManager?.();
+  const displayableSkillCount = skillManager
+    ? skillManager.getDisplayableSkills().length
+    : 0;
+  const activeSkillCount = skillManager
+    ? skillManager
+        .getAllSkills()
+        .filter((skill) => skillManager.isSkillActive(skill.name)).length
+    : 0;
+  const agentRegistry = config.getAgentRegistry?.();
+  const agentCount = agentRegistry
+    ? agentRegistry.getAllDefinitions().length
+    : 0;
 
   const isFullErrorVerbosity = settings.merged.ui.errorVerbosity === 'full';
   const showErrorSummary =
@@ -321,6 +443,40 @@ export const Footer: React.FC = () => {
       }
       case 'model-name': {
         const str = getDisplayString(model);
+        addCol(
+          id,
+          header,
+          () => <Text color={itemColor}>{str}</Text>,
+          str.length,
+        );
+        break;
+      }
+      case 'loop-status': {
+        const str = formatLoopStatus(loopSnapshot, automationModes.loopMode);
+        const color =
+          loopSnapshot.status === 'active'
+            ? theme.status.warning
+            : loopSnapshot.status === 'completed'
+              ? theme.status.success
+              : loopSnapshot.status === 'paused'
+                ? theme.status.error
+                : itemColor;
+        addCol(id, header, () => <Text color={color}>{str}</Text>, str.length);
+        break;
+      }
+      case 'skill-status': {
+        const str = formatSkillStatus(
+          automationModes.skillsMode,
+          activeSkillCount,
+          displayableSkillCount,
+        );
+        const color =
+          activeSkillCount > 0 ? theme.status.success : theme.ui.comment;
+        addCol(id, header, () => <Text color={color}>{str}</Text>, str.length);
+        break;
+      }
+      case 'agent-status': {
+        const str = formatAgentStatus(automationModes.agentsMode, agentCount);
         addCol(
           id,
           header,
