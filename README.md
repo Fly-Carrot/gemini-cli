@@ -1,5 +1,19 @@
 # Gemini CLI
 
+## Gemini-2 Fork
+
+This repository is maintained as the Gemini-2 fork used for a
+shared-fabric-aware engineering workflow. It keeps the official Gemini CLI
+codebase as the base, while adding a thicker local runtime for loop, skills,
+agents, runtime visibility, and upstream compatibility management.
+
+- Gemini-2 fork overview:
+  [GEMINI2_FORK_OVERVIEW.md](/Users/david_chen/Desktop/MCP_Hub/Gemini_CLI_Optimization/ref%20structure/gemini-cli/GEMINI2_FORK_OVERVIEW.md)
+- Workspace archive and bootstrap layer:
+  [Fly-Carrot/Gemini_CLI_Optimization](https://github.com/Fly-Carrot/Gemini_CLI_Optimization)
+- Upstream base:
+  [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)
+
 [![Gemini CLI CI](https://github.com/google-gemini/gemini-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/google-gemini/gemini-cli/actions/workflows/ci.yml)
 [![Gemini CLI E2E (Chained)](https://github.com/google-gemini/gemini-cli/actions/workflows/chained_e2e.yml/badge.svg)](https://github.com/google-gemini/gemini-cli/actions/workflows/chained_e2e.yml)
 [![Version](https://img.shields.io/npm/v/@google/gemini-cli)](https://www.npmjs.com/package/@google/gemini-cli)
