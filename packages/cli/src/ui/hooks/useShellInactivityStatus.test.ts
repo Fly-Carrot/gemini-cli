@@ -106,4 +106,20 @@ describe('useShellInactivityStatus', () => {
     });
     expect(result.current.shouldShowFocusHint).toBe(false);
   });
+
+  it('should escalate to stalled after 3 minutes of shell inactivity', async () => {
+    const { result } = await renderHook(() =>
+      useShellInactivityStatus({ ...defaultProps, lastOutputTime: 500 }),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120000);
+    });
+    expect(result.current.inactivityStatus).toBe('silent_working');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60000);
+    });
+    expect(result.current.inactivityStatus).toBe('stalled');
+  });
 });

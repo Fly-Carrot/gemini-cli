@@ -43,6 +43,11 @@ export const ALL_ITEMS = [
     description: 'Current agent automation mode and available agents',
   },
   {
+    id: 'shell-status',
+    header: 'shell',
+    description: 'Current shell execution state and stall status',
+  },
+  {
     id: 'context-used',
     header: 'context',
     description: 'Percentage of context window used',
@@ -89,6 +94,7 @@ export const DEFAULT_ORDER = [
   'loop-status',
   'skill-status',
   'agent-status',
+  'shell-status',
   'context-used',
   'quota',
   'memory-usage',
@@ -109,6 +115,7 @@ export function deriveItemsFromLegacySettings(
     'loop-status',
     'skill-status',
     'agent-status',
+    'shell-status',
     'quota',
   ];
   const items = [...defaults];

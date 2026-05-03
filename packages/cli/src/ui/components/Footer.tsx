@@ -45,6 +45,7 @@ import {
   type LoopAutomationMode,
   type SkillAutomationMode,
 } from '../../services/automationStrategyService.js';
+import type { InactivityStatus } from '../hooks/useShellInactivityStatus.js';
 
 interface CwdIndicatorProps {
   targetDir: string;
@@ -228,6 +229,27 @@ export function formatAgentStatus(
     return mode;
   }
   return `${mode} ${totalAgentCount} ready`;
+}
+
+export function formatShellStatus(
+  activePtyId: number | undefined,
+  inactivityStatus: InactivityStatus,
+): string {
+  if (!activePtyId) {
+    return 'idle';
+  }
+
+  switch (inactivityStatus) {
+    case 'stalled':
+      return 'stalled';
+    case 'action_required':
+      return 'needs focus';
+    case 'silent_working':
+      return 'busy';
+    case 'none':
+    default:
+      return 'running';
+  }
 }
 
 export const Footer: React.FC = () => {
@@ -483,6 +505,24 @@ export const Footer: React.FC = () => {
           () => <Text color={itemColor}>{str}</Text>,
           str.length,
         );
+        break;
+      }
+      case 'shell-status': {
+        const str = formatShellStatus(
+          uiState.activePtyId,
+          uiState.shellInactivityStatus,
+        );
+        const color =
+          str === 'stalled'
+            ? theme.status.error
+            : str === 'needs focus'
+              ? theme.status.warning
+              : str === 'busy'
+                ? theme.status.warning
+                : str === 'running'
+                  ? theme.status.success
+                  : itemColor;
+        addCol(id, header, () => <Text color={color}>{str}</Text>, str.length);
         break;
       }
       case 'context-used': {

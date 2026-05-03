@@ -12,6 +12,14 @@ GIT_IDENTITY_EMAIL="${GIT_IDENTITY_EMAIL:-41898282+github-actions[bot]@users.nor
 
 CHECK_BRANCH="gemini2-upstream-check-$(date +%Y%m%d%H%M%S)"
 WORKTREE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gemini2-upstream-check.XXXXXX")"
+STEP_SUMMARY_FILE="${GITHUB_STEP_SUMMARY:-}"
+
+write_summary() {
+  local message="$1"
+  if [[ -n "$STEP_SUMMARY_FILE" ]]; then
+    printf '%s\n' "$message" >>"$STEP_SUMMARY_FILE"
+  fi
+}
 
 cleanup() {
   set +e
@@ -51,7 +59,36 @@ if [[ ! -e "$WORKTREE_DIR/node_modules" && -d "$REPO_ROOT/node_modules" ]]; then
   ln -s "$REPO_ROOT/node_modules" "$WORKTREE_DIR/node_modules"
 fi
 
-git rebase "$UPSTREAM_REF"
+if ! git rebase "$UPSTREAM_REF"; then
+  conflicted_files="$(git diff --name-only --diff-filter=U || true)"
+  git rebase --abort >/dev/null 2>&1 || true
+
+  echo "::warning::Gemini-2 upstream compatibility requires manual rebase review."
+  if [[ -n "$conflicted_files" ]]; then
+    echo "Conflicted files:"
+    printf ' - %s\n' $conflicted_files
+  fi
+
+  write_summary "## Gemini-2 upstream compatibility"
+  write_summary ""
+  write_summary "Status: manual rebase review required."
+  write_summary "Current HEAD: \`$HEAD_REF\`"
+  write_summary "Upstream ref: \`$UPSTREAM_REF\`"
+  if [[ -n "$conflicted_files" ]]; then
+    write_summary ""
+    write_summary "Conflicted files:"
+    while IFS= read -r conflicted_file; do
+      [[ -n "$conflicted_file" ]] || continue
+      write_summary "- \`$conflicted_file\`"
+    done <<<"$conflicted_files"
+  fi
+  write_summary ""
+  write_summary "Result: upstream moved into Gemini-2 patch surfaces. Review and rebase locally before the next compatibility verification run."
+
+  echo "Gemini-2 upstream compatibility requires manual rebase review."
+  popd >/dev/null
+  exit 0
+fi
 
 needs_fresh_install=0
 required_paths=(
@@ -77,6 +114,11 @@ if [[ "$needs_fresh_install" -eq 1 ]]; then
 fi
 
 echo "Running Gemini-2 compatibility checks..."
+write_summary "## Gemini-2 upstream compatibility"
+write_summary ""
+write_summary "Status: rebase clean, running verification checks."
+write_summary "Current HEAD: \`$HEAD_REF\`"
+write_summary "Upstream ref: \`$UPSTREAM_REF\`"
 npm run generate
 npm run build --workspace @google/gemini-cli-devtools
 npm run build --workspace @google/gemini-cli-core
@@ -95,5 +137,8 @@ npm run build --workspace @google/gemini-cli
 NEW_HEAD="$(git rev-parse HEAD)"
 echo "Gemini-2 upstream compatibility check succeeded."
 echo "Rebased compatibility HEAD: $NEW_HEAD"
+write_summary ""
+write_summary "Result: verification passed."
+write_summary "Rebased compatibility HEAD: \`$NEW_HEAD\`"
 
 popd >/dev/null

@@ -513,6 +513,7 @@ const baseMockUiState = {
   cleanUiDetailsVisible: false,
   allowPlanMode: true,
   activePtyId: undefined,
+  shellInactivityStatus: 'none' as const,
   backgroundTasks: new Map(),
   backgroundTaskHeight: 0,
   quota: {

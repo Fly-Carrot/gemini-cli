@@ -13,6 +13,7 @@ import {
   SHELL_FOCUS_HINT_DELAY_MS,
   SHELL_ACTION_REQUIRED_TITLE_DELAY_MS,
   SHELL_SILENT_WORKING_TITLE_DELAY_MS,
+  SHELL_STALL_INTERVENTION_DELAY_MS,
 } from '../constants.js';
 import type { StreamingState } from '../types.js';
 
@@ -25,7 +26,11 @@ interface ShellInactivityStatusProps {
   isInteractiveShellEnabled: boolean;
 }
 
-export type InactivityStatus = 'none' | 'action_required' | 'silent_working';
+export type InactivityStatus =
+  | 'none'
+  | 'action_required'
+  | 'silent_working'
+  | 'stalled';
 
 export interface ShellInactivityStatus {
   shouldShowFocusHint: boolean;
@@ -86,8 +91,16 @@ export const useShellInactivityStatus = ({
       : SHELL_ACTION_REQUIRED_TITLE_DELAY_MS * 2,
   );
 
+  const shouldShowStallIntervention = useInactivityTimer(
+    isAwaitingFocus,
+    lastOutputTime,
+    SHELL_STALL_INTERVENTION_DELAY_MS,
+  );
+
   let inactivityStatus: InactivityStatus = 'none';
-  if (shouldShowActionRequiredTitle) {
+  if (shouldShowStallIntervention) {
+    inactivityStatus = 'stalled';
+  } else if (shouldShowActionRequiredTitle) {
     inactivityStatus = 'action_required';
   } else if (shouldShowSilentWorkingTitle) {
     inactivityStatus = 'silent_working';

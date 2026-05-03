@@ -1642,12 +1642,7 @@ export const useGeminiStream = (
         case 'paused':
           {
             const info: HistoryItemInfo = {
-              type:
-                outcome.action === 'blocked' ||
-                outcome.action === 'review' ||
-                outcome.action === 'delegation'
-                  ? MessageType.WARNING
-                  : MessageType.INFO,
+              type: MessageType.INFO,
               text:
                 outcome.action === 'review'
                   ? `Loop auto-run paused for review: ${outcome.reason || 'review requested'}`

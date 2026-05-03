@@ -138,6 +138,7 @@ import { type IdeIntegrationNudgeResult } from './IdeIntegrationNudge.js';
 import { appEvents, AppEvent, TransientMessageType } from '../utils/events.js';
 import { type UpdateObject } from './utils/updateCheck.js';
 import { setUpdateHandler } from '../utils/handleAutoUpdate.js';
+import { LoopRuntimeService } from '../services/loopRuntimeService.js';
 import {
   registerCleanup,
   removeCleanup,
@@ -1293,6 +1294,62 @@ Logging in with Google... Restarting Gemini CLI to continue.
 
   const shouldShowActionRequiredTitle = inactivityStatus === 'action_required';
   const shouldShowSilentWorkingTitle = inactivityStatus === 'silent_working';
+  const shellLoopRuntime = useMemo(
+    () => new LoopRuntimeService(config, config.getTargetDir()),
+    [config],
+  );
+  const lastShellStallNoticeRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (inactivityStatus !== 'stalled' || !activePtyId) {
+      lastShellStallNoticeRef.current = null;
+      return;
+    }
+
+    const noticeKey = `${activePtyId}:${inactivityStatus}`;
+    if (lastShellStallNoticeRef.current === noticeKey) {
+      return;
+    }
+    lastShellStallNoticeRef.current = noticeKey;
+
+    const timestamp = Date.now();
+    historyManager.addItem(
+      {
+        type: MessageType.WARNING,
+        text: `Shell command appears stalled (PTY ${activePtyId}). Focus the shell with Tab to inspect it, press Esc to cancel this turn, or background long-running work before resuming.`,
+      },
+      timestamp,
+    );
+
+    const maybePauseLoopForShellStall = async () => {
+      try {
+        const snapshot = await shellLoopRuntime.getSnapshot();
+        if (
+          snapshot.exists &&
+          snapshot.status === 'active' &&
+          snapshot.autoRunEnabled
+        ) {
+          const paused = await shellLoopRuntime.pauseLoop(
+            `Shell execution appears stalled (PTY ${activePtyId}). Review the shell pane and resolve or cancel it before continuing the loop.`,
+            'review-required',
+          );
+          historyManager.addItem(
+            {
+              type: MessageType.WARNING,
+              text: `Loop auto-run paused: ${paused.stopReason}`,
+            },
+            timestamp + 1,
+          );
+        }
+      } catch (error) {
+        debugLogger.warn('Failed to pause loop after shell stall detection', {
+          error,
+        });
+      }
+    };
+
+    void maybePauseLoopForShellStall();
+  }, [activePtyId, historyManager, inactivityStatus, shellLoopRuntime]);
 
   const handleApprovalModeChangeWithUiReveal = useCallback(
     (mode: ApprovalMode) => {
@@ -2533,6 +2590,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       isRestarting,
       extensionsUpdateState,
       activePtyId,
+      shellInactivityStatus: inactivityStatus,
       backgroundTaskCount,
       isBackgroundTaskVisible,
       embeddedShellFocused,
@@ -2646,6 +2704,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       currentModel,
       extensionsUpdateState,
       activePtyId,
+      inactivityStatus,
       backgroundTaskCount,
       isBackgroundTaskVisible,
       historyManager,

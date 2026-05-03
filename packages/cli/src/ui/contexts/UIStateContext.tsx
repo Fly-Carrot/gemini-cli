@@ -83,6 +83,7 @@ import { type UseHistoryManagerReturn } from '../hooks/useHistoryManager.js';
 import { type RestartReason } from '../hooks/useIdeTrustListener.js';
 import type { TerminalBackgroundColor } from '../utils/terminalCapabilityManager.js';
 import type { BackgroundTask } from '../hooks/useExecutionLifecycle.js';
+import type { InactivityStatus } from '../hooks/useShellInactivityStatus.js';
 
 export interface AccountSuspensionInfo {
   message: string;
@@ -184,6 +185,7 @@ export interface UIState {
   isRestarting: boolean;
   extensionsUpdateState: Map<string, ExtensionUpdateState>;
   activePtyId: number | undefined;
+  shellInactivityStatus: InactivityStatus;
   backgroundTaskCount: number;
   isBackgroundTaskVisible: boolean;
   embeddedShellFocused: boolean;

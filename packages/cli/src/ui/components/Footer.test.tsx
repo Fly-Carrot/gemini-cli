@@ -10,6 +10,7 @@ import {
   Footer,
   formatAgentStatus,
   formatLoopStatus,
+  formatShellStatus,
   formatSkillStatus,
 } from './Footer.js';
 import { createMockSettings } from '../../test-utils/settings.js';
@@ -198,6 +199,19 @@ describe('<Footer />', () => {
       skillsMode: 'auto',
       agentsMode: 'auto',
     };
+  });
+
+  describe('shell status formatting', () => {
+    it('formats idle when there is no active shell', () => {
+      expect(formatShellStatus(undefined, 'none')).toBe('idle');
+    });
+
+    it('formats stalled shells clearly', () => {
+      expect(formatShellStatus(1234, 'stalled')).toBe('stalled');
+      expect(formatShellStatus(1234, 'action_required')).toBe('needs focus');
+      expect(formatShellStatus(1234, 'silent_working')).toBe('busy');
+      expect(formatShellStatus(1234, 'none')).toBe('running');
+    });
   });
 
   afterEach(() => {

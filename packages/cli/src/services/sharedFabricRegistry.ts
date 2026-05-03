@@ -17,11 +17,7 @@ function getDefaultSharedFabricRoot(): string {
 }
 
 function getDefaultSkillsIndexPath(globalRoot: string): string {
-  return path.join(
-    path.dirname(globalRoot),
-    'awesome-skills',
-    'skills_index.json',
-  );
+  return path.join(globalRoot, 'skills', 'awesome-skills', 'skills_index.json');
 }
 
 function getDefaultDomainMapPath(): string {
@@ -114,6 +110,40 @@ function readStringField(
   return typeof field === 'string' ? field : undefined;
 }
 
+function parseFrontMatter(content: string): Record<string, string> {
+  if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) {
+    return {};
+  }
+
+  const lines = content.split(/\r?\n/);
+  const metadata: Record<string, string> = {};
+  let inside = false;
+
+  for (const line of lines) {
+    if (line.trim() === '---') {
+      if (inside) {
+        break;
+      }
+      inside = true;
+      continue;
+    }
+
+    if (!inside) {
+      continue;
+    }
+
+    const match = line.match(/^([a-zA-Z_]+):\s*(.+?)\s*$/);
+    if (!match) {
+      continue;
+    }
+
+    const [, key, rawValue] = match;
+    metadata[key] = rawValue.replace(/^['"]|['"]$/g, '');
+  }
+
+  return metadata;
+}
+
 function extractCatalogEntries(
   parsed: unknown,
 ): Array<Record<string, unknown>> {
@@ -133,8 +163,18 @@ function normalize(value: string): string {
 
 function tokenize(value: string): string[] {
   return normalize(value)
-    .split(/[^a-z0-9\u4e00-\u9fff-]+/i)
+    .split(/[^a-z0-9\u4e00-\u9fff]+/i)
     .filter(Boolean);
+}
+
+function generatePhrases(tokens: string[], maxLength: number = 3): string[] {
+  const phrases: string[] = [];
+  for (let size = 2; size <= maxLength; size += 1) {
+    for (let start = 0; start <= tokens.length - size; start += 1) {
+      phrases.push(tokens.slice(start, start + size).join(' '));
+    }
+  }
+  return phrases;
 }
 
 function uniqueByName<T extends { name: string }>(items: T[]): T[] {
@@ -281,6 +321,11 @@ export class SharedFabricRegistry {
       this.loadDomainRoutes(),
     ]);
     const queryTokens = tokenize(normalizedQuery);
+    const queryPhrases = uniqueByName(
+      [normalizedQuery, ...generatePhrases(queryTokens)].map((phrase) => ({
+        name: phrase,
+      })),
+    ).map((entry) => entry.name);
     const matchedDomain = this.matchDomain(normalizedQuery, domainRoutes);
 
     const scored = catalog
@@ -289,6 +334,9 @@ export class SharedFabricRegistry {
         const name = normalize(entry.name);
         const description = normalize(entry.description || '');
         const category = normalize(entry.category || '');
+        const nameTokens = tokenize(entry.name);
+        const descriptionTokens = tokenize(entry.description || '');
+        const categoryTokens = tokenize(entry.category || '');
 
         if (
           name === normalize(normalizedQuery) ||
@@ -298,14 +346,33 @@ export class SharedFabricRegistry {
         }
 
         for (const token of queryTokens) {
-          if (name.includes(token)) {
+          if (nameTokens.includes(token)) {
             score += 4;
-          }
-          if (description.includes(token)) {
-            score += 2;
-          }
-          if (category.includes(token)) {
+          } else if (name.includes(token)) {
             score += 1;
+          }
+          if (descriptionTokens.includes(token)) {
+            score += 2;
+          } else if (description.includes(token)) {
+            score += 1;
+          }
+          if (categoryTokens.includes(token)) {
+            score += 1;
+          }
+        }
+
+        for (const phrase of queryPhrases) {
+          if (!phrase) {
+            continue;
+          }
+          if (name.includes(phrase)) {
+            score += phrase === normalizedQuery ? 8 : 5;
+          }
+          if (description.includes(phrase)) {
+            score += phrase === normalizedQuery ? 6 : 4;
+          }
+          if (category.includes(phrase)) {
+            score += 2;
           }
         }
 
@@ -316,6 +383,10 @@ export class SharedFabricRegistry {
           )
         ) {
           score += 5;
+        }
+
+        if (entry.category && entry.category !== 'uncategorized') {
+          score += 1;
         }
 
         return {
@@ -629,23 +700,22 @@ export class SharedFabricRegistry {
       return this.catalogCache;
     }
 
+    const sources = await this.loadSources();
     const raw = await fs
       .readFile(this.skillsIndexPath, 'utf-8')
       .catch(() => '');
-    if (!raw) {
-      this.catalogCache = [];
-      return this.catalogCache;
+    let entries: Array<Record<string, unknown>> = [];
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        entries = extractCatalogEntries(parsed);
+      } catch {
+        entries = [];
+      }
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw) as unknown;
-    } catch {
-      this.catalogCache = [];
-      return this.catalogCache;
-    }
-    const entries = extractCatalogEntries(parsed);
 
-    this.catalogCache = entries
+    const curatedEntries = await this.loadCuratedCatalogEntries(sources);
+    const indexedEntries = entries
       .map((entry) => ({
         id: String(entry['id'] || entry['name'] || ''),
         path: String(entry['path'] || ''),
@@ -658,7 +728,51 @@ export class SharedFabricRegistry {
       }))
       .filter((entry) => entry.name && entry.path);
 
+    this.catalogCache = uniqueByName([...curatedEntries, ...indexedEntries]);
+
     return this.catalogCache;
+  }
+
+  private async loadCuratedCatalogEntries(
+    sources: SharedFabricSkillSource[],
+  ): Promise<SharedFabricSkillCatalogEntry[]> {
+    const curatedSources = sources.filter(
+      (source) => source.type === 'curated_skill_repo',
+    );
+    const entries: SharedFabricSkillCatalogEntry[] = [];
+
+    for (const source of curatedSources) {
+      const dirents = await fs
+        .readdir(source.path, { withFileTypes: true })
+        .catch(() => []);
+
+      for (const dirent of dirents) {
+        if (!dirent.isDirectory() && !dirent.isSymbolicLink()) {
+          continue;
+        }
+
+        const skillDir = path.join(source.path, dirent.name);
+        const skillFile = path.join(skillDir, 'SKILL.md');
+        const raw = await fs.readFile(skillFile, 'utf-8').catch(() => '');
+        if (!raw) {
+          continue;
+        }
+
+        const metadata = parseFrontMatter(raw);
+        entries.push({
+          id: metadata['name'] || dirent.name,
+          path: dirent.name,
+          category: metadata['category'],
+          name: metadata['name'] || dirent.name,
+          description: metadata['description'],
+          risk: metadata['risk'],
+          source: source.id,
+          dateAdded: metadata['date_added'],
+        });
+      }
+    }
+
+    return entries;
   }
 
   private async loadDomainRoutes(): Promise<SharedFabricDomainRoute[]> {
