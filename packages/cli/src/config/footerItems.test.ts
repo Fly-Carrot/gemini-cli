@@ -26,6 +26,8 @@ describe('footerItems', () => {
         'loop-status',
         'skill-status',
         'agent-status',
+        'shell-reply-status',
+        'shell-status',
         'quota',
       ]);
     });
@@ -96,6 +98,8 @@ describe('footerItems', () => {
         'loop-status',
         'skill-status',
         'agent-status',
+        'shell-reply-status',
+        'shell-status',
         'context-used',
         'memory-usage',
       ]);
@@ -125,6 +129,8 @@ describe('footerItems', () => {
         'loop-status',
         'skill-status',
         'agent-status',
+        'shell-reply-status',
+        'shell-status',
         'context-used',
         'quota',
         'memory-usage',

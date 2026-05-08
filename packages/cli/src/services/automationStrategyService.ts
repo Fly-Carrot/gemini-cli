@@ -11,11 +11,13 @@ import type { Config } from '@google/gemini-cli-core';
 export type LoopAutomationMode = 'off' | 'auto' | 'full';
 export type SkillAutomationMode = 'manual' | 'auto' | 'full';
 export type AgentAutomationMode = 'manual' | 'auto' | 'full';
+export type ShellReplyMode = 'manual' | 'suggest' | 'auto';
 
 export interface AutomationStrategyState {
   loopMode: LoopAutomationMode;
   skillsMode: SkillAutomationMode;
   agentsMode: AgentAutomationMode;
+  shellReplyMode: ShellReplyMode;
   updatedAt: string;
 }
 
@@ -37,6 +39,11 @@ export const DEFAULT_AUTOMATION_STRATEGY: Omit<
   agentsMode: isAgentsMode(process.env['GEMINI2_DEFAULT_AGENTS_MODE'])
     ? process.env['GEMINI2_DEFAULT_AGENTS_MODE']
     : 'auto',
+  shellReplyMode: isShellReplyMode(
+    process.env['GEMINI2_DEFAULT_SHELL_REPLY_MODE'],
+  )
+    ? process.env['GEMINI2_DEFAULT_SHELL_REPLY_MODE']
+    : 'suggest',
 };
 
 function sanitizeSessionPathSegment(value: string | undefined): string {
@@ -91,6 +98,10 @@ function isAgentsMode(value: unknown): value is AgentAutomationMode {
   return value === 'manual' || value === 'auto' || value === 'full';
 }
 
+function isShellReplyMode(value: unknown): value is ShellReplyMode {
+  return value === 'manual' || value === 'suggest' || value === 'auto';
+}
+
 function parseAutomationStrategyState(
   value: unknown,
 ): AutomationStrategyState | null {
@@ -105,6 +116,7 @@ function parseAutomationStrategyState(
     !isLoopMode(candidate.loopMode) ||
     !isSkillsMode(candidate.skillsMode) ||
     !isAgentsMode(candidate.agentsMode) ||
+    !isShellReplyMode(candidate.shellReplyMode) ||
     typeof candidate.updatedAt !== 'string'
   ) {
     return null;
@@ -114,6 +126,7 @@ function parseAutomationStrategyState(
     loopMode: candidate.loopMode,
     skillsMode: candidate.skillsMode,
     agentsMode: candidate.agentsMode,
+    shellReplyMode: candidate.shellReplyMode,
     updatedAt: candidate.updatedAt,
   };
 }
@@ -163,9 +176,16 @@ export class AutomationStrategyService {
     return this.updateState({ agentsMode });
   }
 
+  async setShellReplyMode(shellReplyMode: ShellReplyMode) {
+    return this.updateState({ shellReplyMode });
+  }
+
   async updateState(
     patch: Partial<
-      Pick<AutomationStrategyState, 'loopMode' | 'skillsMode' | 'agentsMode'>
+      Pick<
+        AutomationStrategyState,
+        'loopMode' | 'skillsMode' | 'agentsMode' | 'shellReplyMode'
+      >
     >,
   ): Promise<AutomationStrategyState> {
     const current = await this.getState();
@@ -230,5 +250,17 @@ export function describeAgentsMode(mode: AgentAutomationMode): string {
     case 'auto':
     default:
       return 'Adaptive agent routing. Gemini-2 will recommend or use subagents when the task clearly benefits from delegation.';
+  }
+}
+
+export function describeShellReplyMode(mode: ShellReplyMode): string {
+  switch (mode) {
+    case 'auto':
+      return 'Automatic shell replies for clearly low-risk prompts such as plain Enter confirmations or safe yes/no continuations. Ambiguous prompts still pause for review.';
+    case 'manual':
+      return 'Manual shell reply mode. Gemini-2 will detect interactive prompts but leave all replies to you.';
+    case 'suggest':
+    default:
+      return 'Suggested shell reply mode. Gemini-2 will detect interactive shell prompts and propose safe replies without sending them automatically.';
   }
 }

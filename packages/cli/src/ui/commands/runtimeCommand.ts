@@ -75,6 +75,7 @@ async function statusAction(
   }
 
   const snapshot = await runtimeService.captureSnapshot();
+  const shellReplyMode = snapshot.automation.shellReplyMode ?? 'suggest';
 
   context.ui.addItem({
     type: MessageType.INFO,
@@ -95,7 +96,7 @@ async function statusAction(
   } as HistoryItemInfo);
   context.ui.addItem({
     type: MessageType.INFO,
-    text: `Automation: loop ${snapshot.automation.loopMode} · skills ${snapshot.automation.skillsMode} · agents ${snapshot.automation.agentsMode}.`,
+    text: `Automation: loop ${snapshot.automation.loopMode} · skills ${snapshot.automation.skillsMode} · agents ${snapshot.automation.agentsMode} · shell-reply ${shellReplyMode}.`,
     secondaryText: `Runtime has ${snapshot.activeSkillNames.length} active skills loaded · ${snapshot.discoveredAgentNames.length} agents registered · ${snapshot.checkpoints.count} checkpoints.`,
   } as HistoryItemInfo);
   context.ui.addItem({

@@ -247,6 +247,7 @@ export const useGeminiStream = (
   const reportedSkillActivationsRef = useRef<Set<string>>(new Set());
   const abortControllerRef = useRef<AbortController | null>(null);
   const turnCancelledRef = useRef(false);
+  const cancellationInfoShownRef = useRef(false);
   const activeQueryIdRef = useRef<string | null>(null);
   const previousApprovalModeRef = useRef<ApprovalMode>(
     config.getApprovalMode(),
@@ -745,10 +746,12 @@ export const useGeminiStream = (
   useEffect(() => {
     if (
       turnCancelledRef.current &&
+      !cancellationInfoShownRef.current &&
       prevActiveShellPtyIdRef.current !== null &&
       activeShellPtyId === null
     ) {
       addItem({ type: MessageType.INFO, text: 'Request cancelled.' });
+      cancellationInfoShownRef.current = true;
       setIsResponding(false);
     }
     prevActiveShellPtyIdRef.current = activeShellPtyId;
@@ -840,6 +843,7 @@ export const useGeminiStream = (
       return;
     }
     turnCancelledRef.current = true;
+    cancellationInfoShownRef.current = false;
     setRetryStatus(null);
 
     // A full cancellation means no tools have produced a final result yet.
@@ -892,16 +896,14 @@ export const useGeminiStream = (
     // Otherwise, we let handleCompletedTools figure out the next step,
     // which might involve sending partial results back to the model.
     if (isFullCancellation) {
-      // If shell is active, we delay this message to ensure correct ordering
-      // (Shell item first, then Info message).
-      if (!activeShellPtyId) {
-        addItem({
-          type: MessageType.INFO,
-          text: 'Request cancelled.',
-        });
-        setIsResponding(false);
-      }
+      addItem({
+        type: MessageType.INFO,
+        text: 'Request cancelled.',
+      });
+      cancellationInfoShownRef.current = true;
     }
+
+    setIsResponding(false);
 
     onCancelSubmit(false);
     setShellInputFocused(false);
@@ -914,7 +916,6 @@ export const useGeminiStream = (
     setShellInputFocused,
     cancelAllToolCalls,
     toolCalls,
-    activeShellPtyId,
     setIsResponding,
   ]);
 
@@ -1709,6 +1710,7 @@ export const useGeminiStream = (
           abortControllerRef.current = new AbortController();
           const abortSignal = abortControllerRef.current.signal;
           turnCancelledRef.current = false;
+          cancellationInfoShownRef.current = false;
 
           if (!prompt_id) {
             prompt_id = config.getSessionId() + '########' + getPromptCount();

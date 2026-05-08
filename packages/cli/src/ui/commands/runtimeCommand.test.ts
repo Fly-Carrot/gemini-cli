@@ -112,6 +112,7 @@ describe('runtimeCommand', () => {
         loopMode: 'auto',
         skillsMode: 'auto',
         agentsMode: 'full',
+        shellReplyMode: 'suggest',
       },
       bridge: {
         snapshotPath: '/workspace/.gemini/tmp/query-runtime-bridge.json',
@@ -142,7 +143,7 @@ describe('runtimeCommand', () => {
     expect(context.ui.addItem).toHaveBeenNthCalledWith(
       4,
       expect.objectContaining({
-        text: 'Automation: loop auto · skills auto · agents full.',
+        text: 'Automation: loop auto · skills auto · agents full · shell-reply suggest.',
       }),
     );
     expect(context.ui.addItem).toHaveBeenNthCalledWith(

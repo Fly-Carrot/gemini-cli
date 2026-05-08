@@ -38,22 +38,28 @@ describe('AutomationStrategyService', () => {
     expect(snapshot.loopMode).toBe(DEFAULT_AUTOMATION_STRATEGY.loopMode);
     expect(snapshot.skillsMode).toBe(DEFAULT_AUTOMATION_STRATEGY.skillsMode);
     expect(snapshot.agentsMode).toBe(DEFAULT_AUTOMATION_STRATEGY.agentsMode);
+    expect(snapshot.shellReplyMode).toBe(
+      DEFAULT_AUTOMATION_STRATEGY.shellReplyMode,
+    );
   });
 
-  it('persists loop, skills, and agents mode changes', async () => {
+  it('persists loop, skills, agents, and shell-reply mode changes', async () => {
     await service.setLoopMode('full');
     await service.setSkillsMode('manual');
-    const state = await service.setAgentsMode('full');
+    await service.setAgentsMode('full');
+    const state = await service.setShellReplyMode('auto');
 
     expect(state.loopMode).toBe('full');
     expect(state.skillsMode).toBe('manual');
     expect(state.agentsMode).toBe('full');
+    expect(state.shellReplyMode).toBe('auto');
 
     const snapshot = await service.getSnapshot();
     expect(snapshot.exists).toBe(true);
     expect(snapshot.loopMode).toBe('full');
     expect(snapshot.skillsMode).toBe('manual');
     expect(snapshot.agentsMode).toBe('full');
+    expect(snapshot.shellReplyMode).toBe('auto');
   });
 
   it('isolates automation state by session id', async () => {

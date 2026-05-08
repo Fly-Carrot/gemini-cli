@@ -43,6 +43,11 @@ export const ALL_ITEMS = [
     description: 'Current agent automation mode and available agents',
   },
   {
+    id: 'shell-reply-status',
+    header: 'reply',
+    description: 'Current shell-reply automation mode',
+  },
+  {
     id: 'shell-status',
     header: 'shell',
     description: 'Current shell execution state and stall status',
@@ -94,6 +99,7 @@ export const DEFAULT_ORDER = [
   'loop-status',
   'skill-status',
   'agent-status',
+  'shell-reply-status',
   'shell-status',
   'context-used',
   'quota',
@@ -115,6 +121,7 @@ export function deriveItemsFromLegacySettings(
     'loop-status',
     'skill-status',
     'agent-status',
+    'shell-reply-status',
     'shell-status',
     'quota',
   ];

@@ -138,7 +138,9 @@ import { type IdeIntegrationNudgeResult } from './IdeIntegrationNudge.js';
 import { appEvents, AppEvent, TransientMessageType } from '../utils/events.js';
 import { type UpdateObject } from './utils/updateCheck.js';
 import { setUpdateHandler } from '../utils/handleAutoUpdate.js';
+import { AutomationStrategyService } from '../services/automationStrategyService.js';
 import { LoopRuntimeService } from '../services/loopRuntimeService.js';
+import { analyzeActiveShellPrompt } from '../services/shellReplyService.js';
 import {
   registerCleanup,
   removeCleanup,
@@ -1298,6 +1300,10 @@ Logging in with Google... Restarting Gemini CLI to continue.
     () => new LoopRuntimeService(config, config.getTargetDir()),
     [config],
   );
+  const shellReplyStrategyService = useMemo(
+    () => new AutomationStrategyService(config),
+    [config],
+  );
   const lastShellStallNoticeRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1306,23 +1312,71 @@ Logging in with Google... Restarting Gemini CLI to continue.
       return;
     }
 
-    const noticeKey = `${activePtyId}:${inactivityStatus}`;
+    const promptAnalysis = analyzeActiveShellPrompt(
+      pendingHistoryItems.at(-1) ?? null,
+      activePtyId,
+    );
+    const noticeKey = `${activePtyId}:${
+      promptAnalysis?.promptText ?? inactivityStatus
+    }`;
     if (lastShellStallNoticeRef.current === noticeKey) {
       return;
     }
     lastShellStallNoticeRef.current = noticeKey;
 
     const timestamp = Date.now();
-    historyManager.addItem(
-      {
-        type: MessageType.WARNING,
-        text: `Shell command appears stalled (PTY ${activePtyId}). Focus the shell with Tab to inspect it, press Esc to cancel this turn, or background long-running work before resuming.`,
-      },
-      timestamp,
-    );
-
-    const maybePauseLoopForShellStall = async () => {
+    const handleShellStall = async () => {
       try {
+        const strategy = await shellReplyStrategyService.getState();
+        if (
+          promptAnalysis &&
+          strategy.shellReplyMode === 'auto' &&
+          promptAnalysis.autoSafe &&
+          promptAnalysis.suggestedReply !== undefined
+        ) {
+          ShellExecutionService.writeToPty(
+            activePtyId,
+            promptAnalysis.suggestedReply.length > 0
+              ? `${promptAnalysis.suggestedReply}\n`
+              : '\n',
+          );
+          historyManager.addItem(
+            {
+              type: MessageType.INFO,
+              text: `Auto-replied to shell prompt on PTY ${activePtyId}.`,
+              secondaryText:
+                promptAnalysis.suggestionLabel ?? promptAnalysis.promptText,
+            } as HistoryItemInfo,
+            timestamp,
+          );
+          return;
+        }
+
+        if (promptAnalysis) {
+          historyManager.addItem(
+            {
+              type: MessageType.INFO,
+              text: `Shell is waiting for input (PTY ${activePtyId}).`,
+              secondaryText:
+                promptAnalysis.suggestedReply !== undefined
+                  ? `${promptAnalysis.promptText} Suggested reply: ${
+                      promptAnalysis.suggestionLabel ??
+                      JSON.stringify(promptAnalysis.suggestedReply)
+                    }. Use /shell-reply reply to send it, or Tab to answer manually.`
+                  : `${promptAnalysis.promptText} ${promptAnalysis.reason} Use /shell-reply status for help, /shell-reply reply <text> to answer, or /agents task shell_reply "${promptAnalysis.promptText}" for deeper analysis.`,
+            },
+            timestamp,
+          );
+        } else {
+          historyManager.addItem(
+            {
+              type: MessageType.WARNING,
+              text: `Shell command appears stalled (PTY ${activePtyId}). Focus the shell with Tab to inspect it, press Esc to cancel this turn, or background long-running work before resuming.`,
+            },
+            timestamp,
+          );
+        }
+
         const snapshot = await shellLoopRuntime.getSnapshot();
         if (
           snapshot.exists &&
@@ -1348,8 +1402,15 @@ Logging in with Google... Restarting Gemini CLI to continue.
       }
     };
 
-    void maybePauseLoopForShellStall();
-  }, [activePtyId, historyManager, inactivityStatus, shellLoopRuntime]);
+    void handleShellStall();
+  }, [
+    activePtyId,
+    historyManager,
+    inactivityStatus,
+    pendingHistoryItems,
+    shellLoopRuntime,
+    shellReplyStrategyService,
+  ]);
 
   const handleApprovalModeChangeWithUiReveal = useCallback(
     (mode: ApprovalMode) => {

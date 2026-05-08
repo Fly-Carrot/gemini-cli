@@ -59,6 +59,7 @@ export interface QueryRuntimeSnapshot {
     loopMode: 'off' | 'auto' | 'full';
     skillsMode: 'manual' | 'auto' | 'full';
     agentsMode: 'manual' | 'auto' | 'full';
+    shellReplyMode: 'manual' | 'suggest' | 'auto';
   };
   bridge: {
     snapshotPath: string;
@@ -189,6 +190,7 @@ export class QueryRuntimeService {
         loopMode: automationStrategy.loopMode,
         skillsMode: automationStrategy.skillsMode,
         agentsMode: automationStrategy.agentsMode,
+        shellReplyMode: automationStrategy.shellReplyMode,
       },
       bridge: {
         snapshotPath: bridgeSnapshotPath,

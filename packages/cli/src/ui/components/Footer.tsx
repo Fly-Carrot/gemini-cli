@@ -43,6 +43,7 @@ import {
   DEFAULT_AUTOMATION_STRATEGY,
   type AgentAutomationMode,
   type LoopAutomationMode,
+  type ShellReplyMode,
   type SkillAutomationMode,
 } from '../../services/automationStrategyService.js';
 import type { InactivityStatus } from '../hooks/useShellInactivityStatus.js';
@@ -231,6 +232,10 @@ export function formatAgentStatus(
   return `${mode} ${totalAgentCount} ready`;
 }
 
+export function formatShellReplyStatus(mode: ShellReplyMode): string {
+  return mode;
+}
+
 export function formatShellStatus(
   activePtyId: number | undefined,
   inactivityStatus: InactivityStatus,
@@ -268,6 +273,7 @@ export const Footer: React.FC = () => {
     loopMode: DEFAULT_AUTOMATION_STRATEGY.loopMode,
     skillsMode: DEFAULT_AUTOMATION_STRATEGY.skillsMode,
     agentsMode: DEFAULT_AUTOMATION_STRATEGY.agentsMode,
+    shellReplyMode: DEFAULT_AUTOMATION_STRATEGY.shellReplyMode,
   });
 
   const {
@@ -334,6 +340,7 @@ export const Footer: React.FC = () => {
             loopMode: DEFAULT_AUTOMATION_STRATEGY.loopMode,
             skillsMode: DEFAULT_AUTOMATION_STRATEGY.skillsMode,
             agentsMode: DEFAULT_AUTOMATION_STRATEGY.agentsMode,
+            shellReplyMode: DEFAULT_AUTOMATION_STRATEGY.shellReplyMode,
           });
         }
       }
@@ -505,6 +512,17 @@ export const Footer: React.FC = () => {
           () => <Text color={itemColor}>{str}</Text>,
           str.length,
         );
+        break;
+      }
+      case 'shell-reply-status': {
+        const str = formatShellReplyStatus(automationModes.shellReplyMode);
+        const color =
+          automationModes.shellReplyMode === 'auto'
+            ? theme.status.success
+            : automationModes.shellReplyMode === 'suggest'
+              ? theme.status.warning
+              : itemColor;
+        addCol(id, header, () => <Text color={color}>{str}</Text>, str.length);
         break;
       }
       case 'shell-status': {

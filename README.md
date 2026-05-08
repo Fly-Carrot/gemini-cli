@@ -1,5 +1,16 @@
 # Gemini CLI
 
+## Archived Gemini-2 Fork
+
+This fork is archived and kept only as a historical Gemini-2 customization
+snapshot. For active use, return to the official Gemini CLI:
+
+- official repo:
+  [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)
+- local active binary on this machine: `/opt/homebrew/bin/gemini`
+
+The rest of this README is preserved from the original fork state for reference.
+
 ## Gemini-2 Fork
 
 This repository is maintained as the Gemini-2 fork used for a

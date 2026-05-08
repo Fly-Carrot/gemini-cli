@@ -1,14 +1,14 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`<Footer /> > displays "Limit reached" message when remaining is 0 1`] = `
-" workspace (/directory)                        sandbox      /model       loop   skills   agents   shell           quota
- ...ar/and/some/more/directories/to/make/it/   no sandbox   gemini-pro   off    auto     auto     idle    limit reached
+" workspace (/directory)              sandbox      /model       loop   skills   agents   reply     shell           quota
+ ...e/more/directories/to/make/it/   no sandbox   gemini-pro   off    auto     auto     suggest   idle    limit reached
 "
 `;
 
 exports[`<Footer /> > displays the usage indicator when usage is low 1`] = `
-" workspace (/directory)                            sandbox      /model       loop    skills   agents   shell      quota
- ...ar/and/some/more/directories/to/make/it/long   no sandbox   gemini-pro   off     auto     auto     idle    85% used
+" workspace (/directory)                  sandbox      /model       loop    skills   agents   reply     shell      quota
+ ...e/more/directories/to/make/it/long   no sandbox   gemini-pro   off     auto     auto     suggest   idle    85% used
 "
 `;
 
@@ -19,31 +19,31 @@ exports[`<Footer /> > footer configuration filtering (golden snapshots) > render
 `;
 
 exports[`<Footer /> > footer configuration filtering (golden snapshots) > renders complete footer with all sections visible (baseline) > complete-footer-wide 1`] = `
-" workspace (/directory)                           sandbox       /model       context    loop   skills    agents   shell
- ...r/and/some/more/directories/to/make/it/long   no sandbox    gemini-pro   14% used   off    auto      auto      idle
+" workspace (/directory)                 sandbox       /model       context    loop   skills    agents   reply     shell
+ .../more/directories/to/make/it/long   no sandbox    gemini-pro   14% used   off    auto      auto     suggest    idle
 "
 `;
 
 exports[`<Footer /> > footer configuration filtering (golden snapshots) > renders footer with CWD and model info hidden to test alignment (only sandbox visible) > footer-only-sandbox 1`] = `
-" sandbox                         loop                      skills                     agents                      shell
- no sandbox                      off                       auto                       auto                         idle
+" sandbox                   loop                skills                agents                reply                  shell
+ no sandbox                off                 auto                  auto                  suggest                 idle
 "
 `;
 
 exports[`<Footer /> > footer configuration filtering (golden snapshots) > renders footer with all optional sections hidden (minimal footer) > footer-minimal 1`] = `
-" loop                                skills                                 agents                                shell
- off                                 auto                                   auto                                   idle
+" loop                       skills                      agents                       reply                        shell
+ off                        auto                        auto                         suggest                       idle
 "
 `;
 
 exports[`<Footer /> > footer configuration filtering (golden snapshots) > renders footer with only model info hidden (partial filtering) > footer-no-model 1`] = `
-" workspace (/directory)                                           sandbox        loop      skills     agents      shell
- ~/project/foo/bar/and/some/more/directories/to/make/it/long      no sandbox     off       auto       auto         idle
+" workspace (/directory)                                         sandbox      loop    skills   agents    reply     shell
+ ~/project/foo/bar/and/some/more/directories/to/make/it/long    no sandbox   off     auto     auto      suggest    idle
 "
 `;
 
 exports[`<Footer /> > hides the usage indicator when usage is not near limit 1`] = `
-" workspace (/directory)                            sandbox      /model       loop    skills   agents   shell      quota
- ...ar/and/some/more/directories/to/make/it/long   no sandbox   gemini-pro   off     auto     auto     idle    15% used
+" workspace (/directory)                  sandbox      /model       loop    skills   agents   reply     shell      quota
+ ...e/more/directories/to/make/it/long   no sandbox   gemini-pro   off     auto     auto     suggest   idle    15% used
 "
 `;

@@ -19,6 +19,7 @@ import { renderHookWithProviders } from '../../test-utils/render.js';
 import { waitFor } from '../../test-utils/async.js';
 import { useGeminiStream } from './useGeminiStream.js';
 import { useKeypress } from './useKeypress.js';
+import { useExecutionLifecycle } from './useExecutionLifecycle.js';
 import * as atCommandProcessor from './atCommandProcessor.js';
 import {
   useToolScheduler,
@@ -168,6 +169,7 @@ vi.mock('@google/gemini-cli-core', async (importOriginal) => {
 });
 
 const mockUseToolScheduler = useToolScheduler as Mock;
+const mockUseExecutionLifecycle = useExecutionLifecycle as Mock;
 vi.mock('./useToolScheduler.js', async (importOriginal) => {
   const actualSchedulerModule = (await importOriginal()) as any;
   return {
@@ -329,9 +331,13 @@ describe('useGeminiStream', () => {
       () => ({ getToolSchemaList: vi.fn(() => []) }) as any,
     ),
     getProjectRoot: vi.fn(() => '/test/dir'),
+    getWorkingDir: vi.fn(() => '/test/dir'),
     getCheckpointingEnabled: vi.fn(() => false),
     getGeminiClient: mockGetGeminiClient,
     getMcpClientManager: () => mockMcpClientManager as any,
+    getAgentRegistry: vi.fn(
+      () => ({ getAllDefinitions: vi.fn(() => []) }) as any,
+    ),
     getApprovalMode: vi.fn(() => ApprovalMode.DEFAULT),
     getUsageStatisticsEnabled: () => true,
     getDebugMode: () => false,
@@ -1598,6 +1604,48 @@ describe('useGeminiStream', () => {
       expect(result.current.streamingState).toBe(StreamingState.Idle);
     });
 
+    it('should return to idle immediately after escape even when a shell PTY is active', async () => {
+      mockUseExecutionLifecycle.mockReturnValue({
+        handleShellCommand: vi.fn(),
+        activeShellPtyId: 4321,
+        lastShellOutputTime: 0,
+        backgroundTaskCount: 0,
+        isBackgroundTaskVisible: false,
+        toggleBackgroundTasks: vi.fn(),
+        backgroundCurrentExecution: vi.fn(),
+        backgroundTasks: new Map(),
+        dismissBackgroundTask: vi.fn(),
+        registerBackgroundTask: vi.fn(),
+      });
+
+      const mockStream = (async function* () {
+        yield { type: 'content', value: 'Part 1' };
+        await new Promise(() => {});
+      })();
+      mockSendMessageStream.mockReturnValue(mockStream);
+
+      const { result } = await renderTestHook();
+
+      await act(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        result.current.submitQuery('test query');
+      });
+
+      await waitFor(() => {
+        expect(result.current.streamingState).toBe(StreamingState.Responding);
+      });
+
+      simulateEscapeKeyPress();
+
+      await waitFor(() => {
+        expect(mockAddItem).toHaveBeenCalledWith({
+          type: MessageType.INFO,
+          text: 'Request cancelled.',
+        });
+        expect(result.current.streamingState).toBe(StreamingState.Idle);
+      });
+    });
+
     it('should call onCancelSubmit handler when escape is pressed', async () => {
       const cancelSubmitSpy = vi.fn();
       const mockStream = (async function* () {
@@ -1635,7 +1683,13 @@ describe('useGeminiStream', () => {
         result.current.submitQuery('test query');
       });
 
-      simulateEscapeKeyPress();
+      await waitFor(() => {
+        expect(result.current.streamingState).toBe(StreamingState.Responding);
+      });
+
+      await act(async () => {
+        simulateEscapeKeyPress();
+      });
 
       expect(cancelSubmitSpy).toHaveBeenCalledWith(false);
     });
@@ -1676,7 +1730,13 @@ describe('useGeminiStream', () => {
         result.current.submitQuery('test query');
       });
 
-      simulateEscapeKeyPress();
+      await waitFor(() => {
+        expect(result.current.streamingState).toBe(StreamingState.Responding);
+      });
+
+      await act(async () => {
+        simulateEscapeKeyPress();
+      });
 
       expect(setShellInputFocusedSpy).toHaveBeenCalledWith(false);
     });

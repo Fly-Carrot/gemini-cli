@@ -10,6 +10,7 @@ import {
   Footer,
   formatAgentStatus,
   formatLoopStatus,
+  formatShellReplyStatus,
   formatShellStatus,
   formatSkillStatus,
 } from './Footer.js';
@@ -41,6 +42,7 @@ const { mocks } = vi.hoisted(() => ({
       loopMode: 'off',
       skillsMode: 'auto',
       agentsMode: 'auto',
+      shellReplyMode: 'suggest',
     },
   },
 }));
@@ -198,6 +200,7 @@ describe('<Footer />', () => {
       loopMode: 'off',
       skillsMode: 'auto',
       agentsMode: 'auto',
+      shellReplyMode: 'suggest',
     };
   });
 
@@ -211,6 +214,14 @@ describe('<Footer />', () => {
       expect(formatShellStatus(1234, 'action_required')).toBe('needs focus');
       expect(formatShellStatus(1234, 'silent_working')).toBe('busy');
       expect(formatShellStatus(1234, 'none')).toBe('running');
+    });
+  });
+
+  describe('shell reply status formatting', () => {
+    it('formats shell-reply automation modes directly', () => {
+      expect(formatShellReplyStatus('manual')).toBe('manual');
+      expect(formatShellReplyStatus('suggest')).toBe('suggest');
+      expect(formatShellReplyStatus('auto')).toBe('auto');
     });
   });
 
